@@ -18,6 +18,7 @@ pub struct RepoInfo {
 pub fn scan_repos() -> Vec<RepoInfo> {
     let home = dirs::home_dir().unwrap_or_default();
     let search_dirs = [
+        home.join("gt"),
         home.join("vibe"),
         home.join("code"),
         home.join("fm"),

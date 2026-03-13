@@ -1,7 +1,21 @@
-use serde::{Deserialize, Serialize};
+#![allow(dead_code)]
+
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Check if the `gt` CLI is available on the system.
+// ── Gas Town workspace discovery ─────────────────────────────────────
+
+pub fn find_gt_root() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let gt = home.join("gt");
+    if gt.join("mayor").is_dir() {
+        Some(gt)
+    } else {
+        None
+    }
+}
+
 pub fn gt_available() -> bool {
     Command::new("gt")
         .arg("--version")
@@ -9,7 +23,6 @@ pub fn gt_available() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// Check if the `bd` (beads) CLI is available.
 pub fn bd_available() -> bool {
     Command::new("bd")
         .arg("--version")
@@ -17,344 +30,320 @@ pub fn bd_available() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Agent {
+// ── JSON structs matching real `gt status --json` ────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct TownStatus {
     pub name: String,
-    pub runtime: String,
-    pub rig: String,
-    pub status: AgentStatus,
-    pub current_bead: Option<String>,
-    pub beads_completed: u32,
-    pub uptime_secs: u64,
+    pub location: String,
+    pub overseer: Option<Overseer>,
+    pub daemon: Option<ServiceStatus>,
+    pub dolt: Option<DoltStatus>,
+    pub tmux: Option<TmuxStatus>,
+    pub agents: Vec<GtAgent>,
+    pub rigs: Vec<GtRig>,
+    pub summary: Option<TownSummary>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AgentStatus {
-    Active,
-    Idle,
-    Stuck,
-    Offline,
-}
-
-impl AgentStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Active => "ACTIVE",
-            Self::Idle => "IDLE",
-            Self::Stuck => "STUCK",
-            Self::Offline => "OFFLINE",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Convoy {
-    pub id: String,
+#[derive(Debug, Deserialize)]
+pub struct Overseer {
     pub name: String,
-    pub total_beads: u32,
-    pub completed_beads: u32,
-    pub in_progress_beads: u32,
-    pub status: ConvoyStatus,
-    pub agents_assigned: Vec<String>,
+    pub email: String,
+    pub unread_mail: u32,
 }
 
-impl Convoy {
-    pub fn progress(&self) -> f64 {
-        if self.total_beads == 0 {
-            return 0.0;
-        }
-        self.completed_beads as f64 / self.total_beads as f64
-    }
+#[derive(Debug, Deserialize)]
+pub struct ServiceStatus {
+    pub running: bool,
+    pub pid: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ConvoyStatus {
-    Active,
-    Completed,
-    Paused,
-    Blocked,
+#[derive(Debug, Deserialize)]
+pub struct DoltStatus {
+    pub running: bool,
+    pub pid: Option<u64>,
+    pub port: Option<u16>,
+    pub data_dir: Option<String>,
 }
 
-impl ConvoyStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Active => "ACTIVE",
-            Self::Completed => "DONE",
-            Self::Paused => "PAUSED",
-            Self::Blocked => "BLOCKED",
-        }
-    }
+#[derive(Debug, Deserialize)]
+pub struct TmuxStatus {
+    pub socket: Option<String>,
+    pub running: bool,
+    pub session_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Bead {
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtAgent {
+    pub name: String,
+    pub address: String,
+    pub session: Option<String>,
+    pub role: Option<String>,
+    pub running: bool,
+    pub has_work: bool,
+    pub state: Option<String>,
+    pub work_title: Option<String>,
+    pub hook_bead: Option<String>,
+    pub unread_mail: Option<u32>,
+    pub agent_alias: Option<String>,
+    pub agent_info: Option<String>,
+    #[serde(default)]
+    pub acp: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtRig {
+    pub name: String,
+    pub polecats: Option<Vec<String>>,
+    pub polecat_count: u32,
+    pub crews: Option<Vec<String>>,
+    pub crew_count: u32,
+    pub has_witness: bool,
+    pub has_refinery: bool,
+    pub hooks: Vec<GtHook>,
+    pub agents: Vec<GtAgent>,
+    pub mq: Option<GtMq>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtHook {
+    pub agent: String,
+    pub role: String,
+    pub has_work: bool,
+    pub molecule: Option<String>,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtMq {
+    pub pending: u32,
+    pub in_flight: u32,
+    pub blocked: u32,
+    pub state: Option<String>,
+    pub health: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TownSummary {
+    pub rig_count: u32,
+    pub polecat_count: u32,
+    pub crew_count: u32,
+    pub witness_count: u32,
+    pub refinery_count: u32,
+    pub active_hooks: u32,
+}
+
+// ── JSON structs matching real `gt convoy list --json` ────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtConvoy {
     pub id: String,
     pub title: String,
-    pub status: BeadStatus,
-    pub assigned_to: Option<String>,
-    pub convoy_id: Option<String>,
-    pub rig: String,
+    pub status: String,
+    pub created_at: Option<String>,
+    pub tracked: Option<Vec<ConvoyTracked>>,
+    pub completed: u32,
+    pub total: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BeadStatus {
-    Open,
-    InProgress,
-    Done,
-    Blocked,
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConvoyTracked {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub assignee: Option<String>,
+    pub worker: Option<String>,
+    pub worker_age: Option<String>,
+    pub blocked: Option<bool>,
 }
 
-impl BeadStatus {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Open => "OPEN",
-            Self::InProgress => "IN PROG",
-            Self::Done => "DONE",
-            Self::Blocked => "BLOCKED",
-        }
-    }
+// ── JSON structs matching real `bd list --json --all` ─────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BdIssue {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub priority: i32,
+    pub issue_type: String,
+    pub assignee: Option<String>,
+    pub owner: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub labels: Option<Vec<String>>,
+    pub dependency_count: Option<u32>,
+    pub dependent_count: Option<u32>,
+    pub comment_count: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeedEntry {
-    pub timestamp: String,
-    pub agent: String,
-    pub action: String,
-    pub detail: String,
-    pub severity: Severity,
+// ── JSON structs matching real `gt mail inbox --json` ─────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtMail {
+    pub id: String,
+    pub from: String,
+    pub to: Option<String>,
+    pub subject: String,
+    pub body: Option<String>,
+    pub timestamp: Option<String>,
+    pub read: bool,
+    pub priority: Option<String>,
+    #[serde(rename = "type")]
+    pub msg_type: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Severity {
-    Info,
-    Warning,
-    Error,
-    Success,
+// ── Events from .events.jsonl ────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GtEvent {
+    pub timestamp: Option<String>,
+    pub event_type: Option<String>,
+    pub actor: Option<String>,
+    pub target: Option<String>,
+    pub detail: Option<String>,
+    pub rig: Option<String>,
 }
 
-/// Attempt to fetch live data from Gas Town CLI. Falls back to demo data.
-pub fn fetch_agents() -> Vec<Agent> {
-    if gt_available() {
-        if let Some(agents) = try_gt_command(&["agents", "--json"]) {
-            if let Ok(parsed) = serde_json::from_str::<Vec<Agent>>(&agents) {
-                return parsed;
-            }
-        }
-    }
-    demo_agents()
-}
+// ── Fetching functions ───────────────────────────────────────────────
 
-pub fn fetch_convoys() -> Vec<Convoy> {
-    if gt_available() {
-        if let Some(out) = try_gt_command(&["convoy", "list", "--json"]) {
-            if let Ok(parsed) = serde_json::from_str::<Vec<Convoy>>(&out) {
-                return parsed;
-            }
-        }
-    }
-    demo_convoys()
-}
-
-pub fn fetch_beads() -> Vec<Bead> {
-    if bd_available() {
-        if let Some(out) = try_bd_command(&["list", "--json"]) {
-            if let Ok(parsed) = serde_json::from_str::<Vec<Bead>>(&out) {
-                return parsed;
-            }
-        }
-    }
-    demo_beads()
-}
-
-pub fn fetch_feed() -> Vec<FeedEntry> {
-    if gt_available() {
-        if let Some(out) = try_gt_command(&["feed", "--json", "--limit", "50"]) {
-            if let Ok(parsed) = serde_json::from_str::<Vec<FeedEntry>>(&out) {
-                return parsed;
-            }
-        }
-    }
-    demo_feed()
-}
-
-fn try_gt_command(args: &[&str]) -> Option<String> {
-    Command::new("gt")
-        .args(args)
+pub fn fetch_status(gt_root: &Path) -> Option<TownStatus> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["status", "--json"])
         .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-}
-
-fn try_bd_command(args: &[&str]) -> Option<String> {
-    Command::new("bd")
-        .args(args)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-}
-
-// ── Demo data for when Gas Town isn't installed ──────────────────────
-
-fn demo_agents() -> Vec<Agent> {
-    let runtimes = ["claude", "claude", "claude", "gemini", "codex", "claude", "cursor", "claude"];
-    let rigs = ["gastown-tui", "neuroplan", "profit-cli", "matrix", "specflow", "healthcentral", "pimfm", "token-tracker"];
-    let statuses = [
-        AgentStatus::Active, AgentStatus::Active, AgentStatus::Idle,
-        AgentStatus::Active, AgentStatus::Stuck, AgentStatus::Active,
-        AgentStatus::Idle, AgentStatus::Active,
-    ];
-    let beads_done = [12, 8, 5, 15, 3, 7, 9, 11];
-    let uptimes = [3600, 7200, 1800, 5400, 900, 4500, 2700, 6300];
-
-    let mut agents = Vec::new();
-    for i in 0..40 {
-        let idx = i % 8;
-        let name = if i < 8 {
-            format!("polecat-{:02}", i + 1)
-        } else {
-            format!("polecat-{:02}", i + 1)
-        };
-        agents.push(Agent {
-            name,
-            runtime: runtimes[idx].to_string(),
-            rig: rigs[idx].to_string(),
-            status: statuses[idx],
-            current_bead: if statuses[idx] == AgentStatus::Active {
-                Some(format!("gt-{:05x}", (i * 7 + 42) % 0xfffff))
-            } else {
-                None
-            },
-            beads_completed: beads_done[idx] + (i as u32 / 8) * 3,
-            uptime_secs: uptimes[idx] + (i as u64) * 300,
-        });
+        .ok()?;
+    if !out.status.success() {
+        return None;
     }
-    agents
+    serde_json::from_slice(&out.stdout).ok()
 }
 
-fn demo_convoys() -> Vec<Convoy> {
-    vec![
-        Convoy {
-            id: "cv-001".into(), name: "API Refactor".into(),
-            total_beads: 24, completed_beads: 18, in_progress_beads: 4,
-            status: ConvoyStatus::Active,
-            agents_assigned: vec!["polecat-01".into(), "polecat-02".into(), "polecat-09".into()],
-        },
-        Convoy {
-            id: "cv-002".into(), name: "Auth Middleware Rewrite".into(),
-            total_beads: 16, completed_beads: 16, in_progress_beads: 0,
-            status: ConvoyStatus::Completed,
-            agents_assigned: vec!["polecat-03".into(), "polecat-04".into()],
-        },
-        Convoy {
-            id: "cv-003".into(), name: "Frontend Dashboard".into(),
-            total_beads: 32, completed_beads: 12, in_progress_beads: 8,
-            status: ConvoyStatus::Active,
-            agents_assigned: vec!["polecat-05".into(), "polecat-06".into(), "polecat-07".into(), "polecat-08".into()],
-        },
-        Convoy {
-            id: "cv-004".into(), name: "Data Pipeline v2".into(),
-            total_beads: 20, completed_beads: 5, in_progress_beads: 2,
-            status: ConvoyStatus::Active,
-            agents_assigned: vec!["polecat-10".into(), "polecat-11".into()],
-        },
-        Convoy {
-            id: "cv-005".into(), name: "Mobile Integration".into(),
-            total_beads: 12, completed_beads: 0, in_progress_beads: 0,
-            status: ConvoyStatus::Paused,
-            agents_assigned: vec![],
-        },
-        Convoy {
-            id: "cv-006".into(), name: "Observability Stack".into(),
-            total_beads: 8, completed_beads: 2, in_progress_beads: 1,
-            status: ConvoyStatus::Blocked,
-            agents_assigned: vec!["polecat-12".into()],
-        },
-        Convoy {
-            id: "cv-007".into(), name: "CI/CD Overhaul".into(),
-            total_beads: 14, completed_beads: 10, in_progress_beads: 3,
-            status: ConvoyStatus::Active,
-            agents_assigned: vec!["polecat-13".into(), "polecat-14".into(), "polecat-15".into()],
-        },
-        Convoy {
-            id: "cv-008".into(), name: "Perf Optimization".into(),
-            total_beads: 18, completed_beads: 6, in_progress_beads: 4,
-            status: ConvoyStatus::Active,
-            agents_assigned: vec!["polecat-16".into(), "polecat-17".into()],
-        },
-    ]
-}
-
-fn demo_beads() -> Vec<Bead> {
-    let titles = [
-        "Implement REST endpoint for /users",
-        "Add JWT validation middleware",
-        "Refactor database connection pool",
-        "Write integration tests for auth flow",
-        "Update OpenAPI spec",
-        "Fix N+1 query in orders endpoint",
-        "Add rate limiting to public API",
-        "Implement webhook retry logic",
-        "Add Prometheus metrics exporter",
-        "Set up Grafana dashboards",
-        "Configure alerting rules",
-        "Migrate to new ORM version",
-        "Add pagination to list endpoints",
-        "Implement search functionality",
-        "Add caching layer for hot paths",
-        "Write E2E tests for checkout flow",
-        "Implement SSO integration",
-        "Add audit logging",
-        "Refactor error handling",
-        "Update CI pipeline for monorepo",
-    ];
-    let statuses = [
-        BeadStatus::Done, BeadStatus::Done, BeadStatus::InProgress,
-        BeadStatus::InProgress, BeadStatus::Open, BeadStatus::Done,
-        BeadStatus::InProgress, BeadStatus::Blocked, BeadStatus::InProgress,
-        BeadStatus::Open, BeadStatus::Open, BeadStatus::Done,
-        BeadStatus::InProgress, BeadStatus::Open, BeadStatus::InProgress,
-        BeadStatus::Blocked, BeadStatus::Open, BeadStatus::Open,
-        BeadStatus::Done, BeadStatus::InProgress,
-    ];
-    let rigs = [
-        "profit-cli", "profit-cli", "neuroplan", "neuroplan", "matrix",
-        "healthcentral", "healthcentral", "specflow", "specflow", "pimfm",
-        "pimfm", "token-tracker", "token-tracker", "matrix", "matrix",
-        "specflow", "neuroplan", "profit-cli", "profit-cli", "gastown-tui",
-    ];
-
-    titles.iter().enumerate().map(|(i, title)| {
-        let status = statuses[i];
-        Bead {
-            id: format!("gt-{:05x}", i * 13 + 100),
-            title: title.to_string(),
-            status,
-            assigned_to: if status == BeadStatus::InProgress {
-                Some(format!("polecat-{:02}", (i % 15) + 1))
-            } else {
-                None
-            },
-            convoy_id: Some(format!("cv-{:03}", (i / 3) + 1)),
-            rig: rigs[i].to_string(),
+pub fn fetch_convoys(gt_root: &Path) -> Vec<GtConvoy> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["convoy", "list", "--json"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            serde_json::from_slice(&o.stdout).unwrap_or_default()
         }
-    }).collect()
+        _ => Vec::new(),
+    }
 }
 
-fn demo_feed() -> Vec<FeedEntry> {
-    vec![
-        FeedEntry { timestamp: "14:23:01".into(), agent: "polecat-01".into(), action: "completed".into(), detail: "gt-00064 Implement REST endpoint".into(), severity: Severity::Success },
-        FeedEntry { timestamp: "14:22:45".into(), agent: "polecat-04".into(), action: "started".into(), detail: "gt-0012c Migrate to new ORM".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:22:12".into(), agent: "mayor".into(), action: "slung".into(), detail: "gt-00096 to polecat-05 in specflow".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:21:58".into(), agent: "polecat-05".into(), action: "stuck".into(), detail: "Merge conflict in src/handlers.rs".into(), severity: Severity::Warning },
-        FeedEntry { timestamp: "14:21:30".into(), agent: "polecat-02".into(), action: "completed".into(), detail: "gt-0007d Add JWT validation".into(), severity: Severity::Success },
-        FeedEntry { timestamp: "14:20:15".into(), agent: "polecat-08".into(), action: "blocked".into(), detail: "Waiting on dependency gt-00096".into(), severity: Severity::Error },
-        FeedEntry { timestamp: "14:19:42".into(), agent: "mayor".into(), action: "created".into(), detail: "Convoy cv-008 Perf Optimization".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:18:55".into(), agent: "polecat-10".into(), action: "started".into(), detail: "gt-000c8 Add caching layer".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:17:30".into(), agent: "polecat-03".into(), action: "completed".into(), detail: "gt-000af Refactor error handling".into(), severity: Severity::Success },
-        FeedEntry { timestamp: "14:16:22".into(), agent: "polecat-12".into(), action: "started".into(), detail: "gt-000be Update CI pipeline".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:15:00".into(), agent: "mayor".into(), action: "slung".into(), detail: "gt-000d2 to polecat-16 in matrix".into(), severity: Severity::Info },
-        FeedEntry { timestamp: "14:14:33".into(), agent: "polecat-07".into(), action: "completed".into(), detail: "gt-00091 Add pagination".into(), severity: Severity::Success },
-    ]
+pub fn fetch_beads_for_rig(gt_root: &Path, rig_name: &str) -> Vec<BdIssue> {
+    let rig_dir = gt_root.join(rig_name);
+    if !rig_dir.is_dir() {
+        return Vec::new();
+    }
+    let out = Command::new("bd")
+        .current_dir(&rig_dir)
+        .args(["list", "--json", "--all", "-n", "0"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            serde_json::from_slice(&o.stdout).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+pub fn fetch_hq_beads(gt_root: &Path) -> Vec<BdIssue> {
+    let out = Command::new("bd")
+        .current_dir(gt_root)
+        .args(["list", "--json", "--all", "-n", "0"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            serde_json::from_slice(&o.stdout).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+pub fn fetch_mail(gt_root: &Path) -> Vec<GtMail> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["mail", "inbox", "--json"])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            serde_json::from_slice(&o.stdout).unwrap_or_default()
+        }
+        _ => Vec::new(),
+    }
+}
+
+pub fn fetch_events(gt_root: &Path, limit: usize) -> Vec<GtEvent> {
+    let events_file = gt_root.join(".events.jsonl");
+    if !events_file.exists() {
+        return Vec::new();
+    }
+    let content = std::fs::read_to_string(&events_file).unwrap_or_default();
+    let mut events: Vec<GtEvent> = content
+        .lines()
+        .rev()
+        .take(limit)
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect();
+    events.reverse();
+    events
+}
+
+// ── Actions ──────────────────────────────────────────────────────────
+
+pub fn sling_bead(gt_root: &Path, bead_id: &str, rig: &str) -> Result<String, String> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["sling", bead_id, rig])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
+}
+
+pub fn create_bead(
+    gt_root: &Path,
+    rig_name: &str,
+    title: &str,
+    issue_type: &str,
+    priority: u8,
+) -> Result<String, String> {
+    let rig_dir = gt_root.join(rig_name);
+    let out = Command::new("bd")
+        .current_dir(&rig_dir)
+        .args([
+            "create",
+            title,
+            "-t",
+            issue_type,
+            "-p",
+            &priority.to_string(),
+            "--json",
+            "--silent",
+        ])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
+}
+
+pub fn spawn_polecat(gt_root: &Path, rig: &str, bead_id: &str) -> Result<String, String> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["sling", bead_id, rig])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
 }

@@ -1,17 +1,16 @@
 use ratatui::{
-    layout::{Alignment, Constraint, Layout, Margin, Rect},
+    layout::{Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Cell, Clear, LineGauge, List, ListItem, Padding,
-        Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Tabs, Wrap,
+        Block, BorderType, Borders, Cell, Clear, LineGauge, List, ListItem, Padding, Paragraph,
+        Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Tabs, Wrap,
     },
     Frame,
 };
 
 use crate::app::{App, TAB_NAMES};
-use crate::gastown::{AgentStatus, BeadStatus, ConvoyStatus, Severity};
 
 // ── Color palette ────────────────────────────────────────────────────
 
@@ -61,9 +60,8 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 
 fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     let [title_area, tabs_area] =
-        Layout::horizontal([Constraint::Length(20), Constraint::Min(40)]).areas(area);
+        Layout::horizontal([Constraint::Length(22), Constraint::Min(40)]).areas(area);
 
-    // Animated spinner
     let spinner = ['◐', '◓', '◑', '◒'];
     let spin_char = spinner[(app.tick as usize / 2) % spinner.len()];
 
@@ -74,9 +72,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             "GAS TOWN",
-            Style::default()
-                .fg(TEXT_BRIGHT)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" TUI", Style::default().fg(ACCENT_DIM)),
     ]))
@@ -85,18 +81,16 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             .borders(Borders::BOTTOM)
             .border_style(Style::default().fg(BORDER))
             .border_type(BorderType::Rounded),
-    )
-    .alignment(Alignment::Left);
+    );
     frame.render_widget(title, title_area);
 
     let tab_titles: Vec<Line> = TAB_NAMES
         .iter()
         .enumerate()
         .map(|(i, t)| {
-            let num = format!("{}", i + 1);
             Line::from(vec![
                 Span::styled(
-                    num,
+                    format!("{}", i + 1),
                     Style::default().fg(ACCENT_DIM).add_modifier(Modifier::DIM),
                 ),
                 Span::raw(":"),
@@ -126,12 +120,27 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 // ── Footer ───────────────────────────────────────────────────────────
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let status = if app.gt_available {
-        Span::styled(" GT ✓ ", Style::default().fg(GREEN).bg(Color::Rgb(30, 50, 30)))
+    let gt_status = if app.gt_root.is_some() {
+        Span::styled(
+            " GT ✓ ",
+            Style::default().fg(GREEN).bg(Color::Rgb(30, 50, 30)),
+        )
     } else {
         Span::styled(
-            " GT: demo mode ",
-            Style::default().fg(YELLOW).bg(Color::Rgb(50, 45, 20)),
+            " GT ✗ ",
+            Style::default().fg(RED).bg(Color::Rgb(50, 30, 30)),
+        )
+    };
+
+    let dolt_status = if app.dolt_running {
+        Span::styled(
+            "Dolt ✓ ",
+            Style::default().fg(GREEN),
+        )
+    } else {
+        Span::styled(
+            "Dolt ✗ ",
+            Style::default().fg(MUTED),
         )
     };
 
@@ -142,10 +151,16 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled("█", Style::default().fg(ACCENT)),
             Span::styled("  Esc:close  Enter:apply", Style::default().fg(MUTED)),
         ])
+    } else if let Some(ref msg) = app.status_msg {
+        Line::from(vec![
+            Span::styled(format!(" {msg} "), Style::default().fg(YELLOW)),
+            Span::styled("  Esc:dismiss", Style::default().fg(MUTED)),
+        ])
     } else {
         Line::from(vec![
-            status,
+            gt_status,
             Span::raw(" "),
+            dolt_status,
             Span::styled("q", Style::default().fg(ACCENT)),
             Span::styled(":quit ", Style::default().fg(MUTED)),
             Span::styled("Tab", Style::default().fg(ACCENT)),
@@ -170,75 +185,66 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
 fn draw_dashboard(frame: &mut Frame, app: &mut App, area: Rect) {
     let [top, mid, bottom] = Layout::vertical([
         Constraint::Length(5),
-        Constraint::Length(12),
+        Constraint::Length(14),
         Constraint::Min(6),
     ])
     .areas(area);
 
-    // ── Stats cards ──
-    let [card1, card2, card3, card4] = Layout::horizontal([
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
+    // ── Stat cards ──
+    let [card1, card2, card3, card4, card5] = Layout::horizontal([
+        Constraint::Percentage(20),
+        Constraint::Percentage(20),
+        Constraint::Percentage(20),
+        Constraint::Percentage(20),
+        Constraint::Percentage(20),
     ])
     .areas(top);
 
     draw_stat_card(
-        frame,
-        card1,
-        "Agents Active",
-        &app.agents_active.to_string(),
-        &format!("/{}", app.agents.len()),
-        GREEN,
-    );
-    draw_stat_card(
-        frame,
-        card2,
-        "Beads Done",
-        &app.total_beads_done.to_string(),
-        &format!(
-            "/{}",
-            app.total_beads_done
-                + app.total_beads_open
-                + app.total_beads_progress
-                + app.total_beads_blocked
-        ),
+        frame, card1, "Rigs",
+        &app.summary.rig_count.to_string(),
+        "registered",
         CYAN,
     );
     draw_stat_card(
-        frame,
-        card3,
-        "Active Convoys",
-        &app.active_convoys().len().to_string(),
-        &format!("/{}", app.convoys.len()),
-        PURPLE,
+        frame, card2, "Agents",
+        &format!("{}/{}", app.agents_running(), app.agents.len()),
+        "running",
+        if app.agents_running() > 0 { GREEN } else { MUTED },
     );
     draw_stat_card(
-        frame,
-        card4,
-        "Stuck/Blocked",
-        &format!(
-            "{}/{}",
-            app.agents_stuck, app.total_beads_blocked
-        ),
-        "agents/beads",
-        if app.agents_stuck > 0 || app.total_beads_blocked > 0 {
-            RED
-        } else {
-            GREEN
-        },
+        frame, card3, "Polecats",
+        &app.summary.polecat_count.to_string(),
+        &format!("{} hooks", app.summary.active_hooks),
+        PURPLE,
     );
 
-    // ── Convoy progress bars ──
-    let [convoy_area, agent_mini_area] =
-        Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(mid);
+    let user_beads = app.user_beads();
+    let open_beads = user_beads.iter().filter(|(_, b)| b.status == "open").count();
+    let in_prog = user_beads.iter().filter(|(_, b)| b.status == "in_progress").count();
+    draw_stat_card(
+        frame, card4, "Beads",
+        &format!("{}/{}", in_prog, user_beads.len()),
+        &format!("{open_beads} open"),
+        ACCENT,
+    );
 
-    draw_convoy_progress(frame, app, convoy_area);
-    draw_agent_status_mini(frame, app, agent_mini_area);
+    draw_stat_card(
+        frame, card5, "Mail",
+        &app.unread_mail.to_string(),
+        "unread",
+        if app.unread_mail > 0 { YELLOW } else { MUTED },
+    );
 
-    // ── Activity feed ──
-    draw_feed(frame, app, bottom);
+    // ── Rig overview + infrastructure ──
+    let [rigs_area, infra_area] =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).areas(mid);
+
+    draw_rig_overview(frame, app, rigs_area);
+    draw_infra_status(frame, app, infra_area);
+
+    // ── Recent beads ──
+    draw_recent_beads(frame, app, bottom);
 }
 
 fn draw_stat_card(
@@ -261,94 +267,86 @@ fn draw_stat_card(
     let [label_area, value_area] =
         Layout::vertical([Constraint::Length(1), Constraint::Length(2)]).areas(inner);
 
-    let label_w = Paragraph::new(Span::styled(
-        label,
-        Style::default().fg(MUTED).add_modifier(Modifier::DIM),
-    ));
-    frame.render_widget(label_w, label_area);
-
-    let value_w = Paragraph::new(Line::from(vec![
-        Span::styled(
-            value,
-            Style::default()
-                .fg(color)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {suffix}"),
-            Style::default().fg(MUTED),
-        ),
-    ]));
-    frame.render_widget(value_w, value_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(label, Style::default().fg(MUTED))),
+        label_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(value, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {suffix}"), Style::default().fg(MUTED)),
+        ])),
+        value_area,
+    );
 }
 
-fn draw_convoy_progress(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_rig_overview(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(Span::styled(
-            " Convoy Progress ",
+            " Rigs ",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(BORDER))
-        .style(Style::default().bg(SURFACE))
-        .padding(Padding::new(1, 1, 0, 0));
+        .style(Style::default().bg(SURFACE));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let active = app.active_convoys();
-    let constraints: Vec<Constraint> = active.iter().map(|_| Constraint::Length(2)).collect();
-    if constraints.is_empty() {
-        let empty = Paragraph::new(Span::styled("No active convoys", Style::default().fg(MUTED)));
-        frame.render_widget(empty, inner);
+    if app.rigs.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("No rigs registered", Style::default().fg(MUTED))),
+            inner,
+        );
         return;
     }
-    let rows = Layout::vertical(constraints).split(inner);
 
-    for (i, convoy) in active.iter().enumerate() {
-        if i >= rows.len() {
-            break;
-        }
-        let [label_area, gauge_area] =
-            Layout::horizontal([Constraint::Length(22), Constraint::Min(10)]).areas(rows[i]);
+    let header = Row::new(vec![
+        Cell::from("Rig").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Polecats").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Crew").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Wit").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Ref").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Hooks").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+    ]);
 
-        let truncated_name = if convoy.name.len() > 18 {
-            format!("{}…", &convoy.name[..17])
-        } else {
-            convoy.name.clone()
-        };
+    let rows: Vec<Row> = app.rigs.iter().map(|rig| {
+        let active_hooks = rig.hooks.iter().filter(|h| h.has_work).count();
+        Row::new(vec![
+            Cell::from(rig.name.clone()).style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+            Cell::from(rig.polecat_count.to_string()).style(Style::default().fg(
+                if rig.polecat_count > 0 { GREEN } else { MUTED }
+            )),
+            Cell::from(rig.crew_count.to_string()).style(Style::default().fg(MUTED)),
+            Cell::from(if rig.has_witness { "✓" } else { "✗" }).style(Style::default().fg(
+                if rig.has_witness { GREEN } else { MUTED }
+            )),
+            Cell::from(if rig.has_refinery { "✓" } else { "✗" }).style(Style::default().fg(
+                if rig.has_refinery { GREEN } else { MUTED }
+            )),
+            Cell::from(format!("{}/{}", active_hooks, rig.hooks.len())).style(Style::default().fg(
+                if active_hooks > 0 { YELLOW } else { MUTED }
+            )),
+        ])
+    }).collect();
 
-        let label = Paragraph::new(Span::styled(truncated_name, Style::default().fg(TEXT)));
-        frame.render_widget(label, label_area);
+    let widths = [
+        Constraint::Length(16),
+        Constraint::Length(9),
+        Constraint::Length(6),
+        Constraint::Length(5),
+        Constraint::Length(5),
+        Constraint::Length(8),
+    ];
 
-        let color = match convoy.progress() {
-            p if p >= 0.9 => GREEN,
-            p if p >= 0.5 => CYAN,
-            p if p >= 0.2 => YELLOW,
-            _ => ORANGE,
-        };
-
-        let pct = (convoy.progress() * 100.0) as u16;
-        let gauge = LineGauge::default()
-            .filled_style(Style::default().fg(color))
-            .unfilled_style(Style::default().fg(Color::Rgb(40, 40, 55)))
-            .line_set(symbols::line::THICK)
-            .label(Span::styled(
-                format!(
-                    "{}/{} ({}%)",
-                    convoy.completed_beads, convoy.total_beads, pct
-                ),
-                Style::default().fg(TEXT),
-            ))
-            .ratio(convoy.progress());
-        frame.render_widget(gauge, gauge_area);
-    }
+    let table = Table::new(rows, widths).header(header);
+    frame.render_widget(table, inner);
 }
 
-fn draw_agent_status_mini(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_infra_status(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(Span::styled(
-            " Agent Overview ",
+            " Infrastructure ",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
@@ -359,47 +357,59 @@ fn draw_agent_status_mini(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Render a mini grid of agent status dots
-    let cols = (inner.width as usize).max(1);
-    let agents = &app.agents;
-    let mut lines: Vec<Line> = Vec::new();
-    let mut spans: Vec<Span> = Vec::new();
+    let status_line = |name: &str, running: bool, extra: &str| -> Line {
+        let (sym, color) = if running { ("●", GREEN) } else { ("○", MUTED) };
+        Line::from(vec![
+            Span::styled(format!(" {sym} "), Style::default().fg(color)),
+            Span::styled(format!("{name:<12}"), Style::default().fg(TEXT)),
+            Span::styled(
+                if running { "running" } else { "stopped" },
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!("  {extra}"), Style::default().fg(MUTED)),
+        ])
+    };
 
-    for (i, agent) in agents.iter().enumerate() {
-        let (sym, color) = match agent.status {
-            AgentStatus::Active => ("●", GREEN),
-            AgentStatus::Idle => ("○", MUTED),
-            AgentStatus::Stuck => ("◆", YELLOW),
-            AgentStatus::Offline => ("·", Color::Rgb(50, 50, 60)),
-        };
-        spans.push(Span::styled(format!("{sym} "), Style::default().fg(color)));
-
-        if (i + 1) % (cols / 2).max(1) == 0 || i == agents.len() - 1 {
-            lines.push(Line::from(std::mem::take(&mut spans)));
-        }
-    }
-
-    // Legend
-    lines.push(Line::default());
-    lines.push(Line::from(vec![
-        Span::styled("● ", Style::default().fg(GREEN)),
-        Span::styled("active  ", Style::default().fg(MUTED)),
-        Span::styled("○ ", Style::default().fg(MUTED)),
-        Span::styled("idle  ", Style::default().fg(MUTED)),
-        Span::styled("◆ ", Style::default().fg(YELLOW)),
-        Span::styled("stuck  ", Style::default().fg(MUTED)),
-        Span::styled("· ", Style::default().fg(Color::Rgb(50, 50, 60))),
-        Span::styled("offline", Style::default().fg(MUTED)),
-    ]));
+    let lines = vec![
+        status_line("Daemon", app.daemon_running, ""),
+        status_line("Dolt", app.dolt_running, "port 3307"),
+        status_line(
+            "Tmux",
+            app.tmux_running,
+            &format!("{} sessions", app.tmux_sessions),
+        ),
+        Line::default(),
+        Line::from(vec![
+            Span::styled("   Overseer: ", Style::default().fg(MUTED)),
+            Span::styled(&app.overseer_name, Style::default().fg(TEXT_BRIGHT)),
+        ]),
+        Line::from(vec![
+            Span::styled("   Workspace: ", Style::default().fg(MUTED)),
+            Span::styled(
+                app.gt_root.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "not found".into()),
+                Style::default().fg(ACCENT_DIM),
+            ),
+        ]),
+        Line::default(),
+        Line::from(vec![
+            Span::styled("   Agents: ", Style::default().fg(MUTED)),
+            Span::styled(format!("{} running", app.agents_running()), Style::default().fg(
+                if app.agents_running() > 0 { GREEN } else { MUTED }
+            )),
+            Span::styled(format!("  {} with work", app.agents_with_work()), Style::default().fg(
+                if app.agents_with_work() > 0 { CYAN } else { MUTED }
+            )),
+        ]),
+    ];
 
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, inner);
 }
 
-fn draw_feed(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_recent_beads(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(Span::styled(
-            " Activity Feed ",
+            " Recent Beads (user tasks) ",
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
@@ -410,45 +420,45 @@ fn draw_feed(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let items: Vec<ListItem> = app
-        .feed
-        .iter()
-        .map(|entry| {
-            let sev_color = match entry.severity {
-                Severity::Info => ACCENT_DIM,
-                Severity::Warning => YELLOW,
-                Severity::Error => RED,
-                Severity::Success => GREEN,
-            };
-            let sev_sym = match entry.severity {
-                Severity::Info => "ℹ",
-                Severity::Warning => "⚠",
-                Severity::Error => "✗",
-                Severity::Success => "✓",
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{} ", entry.timestamp),
-                    Style::default().fg(MUTED),
-                ),
-                Span::styled(format!("{sev_sym} "), Style::default().fg(sev_color)),
-                Span::styled(
-                    format!("{:<12} ", entry.agent),
-                    Style::default()
-                        .fg(CYAN)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{:<10} ", entry.action),
-                    Style::default().fg(sev_color),
-                ),
-                Span::styled(&entry.detail, Style::default().fg(TEXT)),
-            ]))
-        })
-        .collect();
+    let beads = app.user_beads();
+    if beads.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled("No beads found. Create tasks with 's' to spawn.", Style::default().fg(MUTED))),
+            inner,
+        );
+        return;
+    }
 
-    let list = List::new(items);
-    frame.render_widget(list, inner);
+    let items: Vec<ListItem> = beads.iter().take(inner.height as usize).map(|(rig, bead)| {
+        let (status_sym, status_color) = match bead.status.as_str() {
+            "open" => ("○", MUTED),
+            "in_progress" => ("◉", CYAN),
+            "closed" => ("✓", GREEN),
+            "blocked" => ("✗", RED),
+            _ => ("?", MUTED),
+        };
+        let priority_color = match bead.priority {
+            0 => RED,
+            1 => ORANGE,
+            2 => YELLOW,
+            3 => MUTED,
+            _ => Color::Rgb(50, 50, 60),
+        };
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("{status_sym} "), Style::default().fg(status_color)),
+            Span::styled(format!("P{} ", bead.priority), Style::default().fg(priority_color)),
+            Span::styled(format!("{:<10} ", bead.id), Style::default().fg(ACCENT_DIM)),
+            Span::styled(format!("{:<12} ", rig), Style::default().fg(PURPLE)),
+            Span::styled(&bead.title, Style::default().fg(TEXT)),
+            if let Some(ref assignee) = bead.assignee {
+                Span::styled(format!("  → {assignee}"), Style::default().fg(CYAN))
+            } else {
+                Span::raw("")
+            },
+        ]))
+    }).collect();
+
+    frame.render_widget(List::new(items), inner);
 }
 
 // ── Agents tab ───────────────────────────────────────────────────────
@@ -460,65 +470,64 @@ fn draw_agents(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let header = Row::new(vec![
         Cell::from("Name").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Status").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Address").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Role").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("State").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Run").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Work").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Runtime").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Rig").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Current Bead").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Done").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Uptime").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Hook Bead").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Mail").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = agents
-        .iter()
-        .skip(app.scroll)
-        .map(|agent| {
-            let status_color = match agent.status {
-                AgentStatus::Active => GREEN,
-                AgentStatus::Idle => MUTED,
-                AgentStatus::Stuck => YELLOW,
-                AgentStatus::Offline => RED,
-            };
-            let uptime = format_duration(agent.uptime_secs);
-            Row::new(vec![
-                Cell::from(agent.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
-                Cell::from(agent.status.label()).style(
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(agent.runtime.clone()).style(Style::default().fg(PURPLE)),
-                Cell::from(agent.rig.clone()).style(Style::default().fg(CYAN)),
-                Cell::from(
-                    agent
-                        .current_bead
-                        .clone()
-                        .unwrap_or_else(|| "—".into()),
-                )
-                .style(Style::default().fg(ACCENT_DIM)),
-                Cell::from(agent.beads_completed.to_string())
-                    .style(Style::default().fg(GREEN)),
-                Cell::from(uptime).style(Style::default().fg(MUTED)),
-            ])
-        })
-        .collect();
+    let rows: Vec<Row> = agents.iter().skip(app.scroll).map(|agent| {
+        let running_color = if agent.running { GREEN } else { MUTED };
+        let work_color = if agent.has_work { CYAN } else { MUTED };
+        let role = agent.role.as_deref().unwrap_or("—");
+        let state = agent.state.as_deref().unwrap_or("—");
+        let state_color = match state {
+            "active" | "working" => GREEN,
+            "idle" => MUTED,
+            "stuck" => YELLOW,
+            _ => TEXT,
+        };
+        let runtime = agent.agent_alias.as_deref().unwrap_or("—");
+        let hook = agent.hook_bead.as_deref().unwrap_or("—");
+        let mail = agent.unread_mail.unwrap_or(0);
+
+        Row::new(vec![
+            Cell::from(agent.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
+            Cell::from(agent.address.clone()).style(Style::default().fg(ACCENT_DIM)),
+            Cell::from(role.to_string()).style(Style::default().fg(PURPLE)),
+            Cell::from(state.to_string()).style(Style::default().fg(state_color).add_modifier(Modifier::BOLD)),
+            Cell::from(if agent.running { "✓" } else { "✗" }).style(Style::default().fg(running_color)),
+            Cell::from(if agent.has_work { "✓" } else { "—" }).style(Style::default().fg(work_color)),
+            Cell::from(runtime.to_string()).style(Style::default().fg(MUTED)),
+            Cell::from(hook.to_string()).style(Style::default().fg(if hook != "—" { CYAN } else { MUTED })),
+            Cell::from(if mail > 0 { format!("{mail}") } else { "—".into() }).style(Style::default().fg(
+                if mail > 0 { YELLOW } else { MUTED }
+            )),
+        ])
+    }).collect();
 
     let widths = [
+        Constraint::Length(12),
+        Constraint::Length(22),
         Constraint::Length(14),
         Constraint::Length(8),
-        Constraint::Length(10),
-        Constraint::Length(16),
-        Constraint::Length(14),
+        Constraint::Length(5),
         Constraint::Length(6),
         Constraint::Length(10),
+        Constraint::Length(12),
+        Constraint::Length(6),
     ];
 
     let table = Table::new(rows, widths)
         .header(header.style(Style::default().bg(SURFACE)))
-        .row_highlight_style(Style::default().bg(Color::Rgb(40, 40, 60)))
         .block(
             Block::default()
                 .title(Span::styled(
-                    format!(" Agents ({}) ", agents.len()),
+                    format!(" Agents ({count}) "),
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
@@ -526,16 +535,10 @@ fn draw_agents(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(BORDER))
                 .style(Style::default().bg(SURFACE)),
         );
-
     frame.render_widget(table, area);
 
-    // Scrollbar
-    let sb_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 0,
-    });
-    let mut sb_state =
-        ScrollbarState::new(agents.len()).position(app.scroll);
+    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_style(Style::default().fg(ACCENT_DIM))
@@ -554,7 +557,7 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let block = Block::default()
         .title(Span::styled(
-            format!(" Convoys ({}) ", convoys.len()),
+            format!(" Convoys ({count}) "),
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
@@ -565,18 +568,23 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Each convoy gets 4 lines
+    if convoys.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "No convoys. Create one with: gt convoy create \"name\" <bead-id>",
+                Style::default().fg(MUTED),
+            )),
+            inner,
+        );
+        return;
+    }
+
     let constraints: Vec<Constraint> = convoys
         .iter()
         .skip(app.scroll)
         .take(inner.height as usize / 4)
         .map(|_| Constraint::Length(4))
         .collect();
-    if constraints.is_empty() {
-        let empty = Paragraph::new(Span::styled("No convoys found", Style::default().fg(MUTED)));
-        frame.render_widget(empty, inner);
-        return;
-    }
     let rows = Layout::vertical(constraints).split(inner);
 
     for (i, convoy) in convoys.iter().skip(app.scroll).enumerate() {
@@ -592,45 +600,32 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
         ])
         .areas(row);
 
-        let status_color = match convoy.status {
-            ConvoyStatus::Active => GREEN,
-            ConvoyStatus::Completed => CYAN,
-            ConvoyStatus::Paused => YELLOW,
-            ConvoyStatus::Blocked => RED,
+        let status_color = match convoy.status.as_str() {
+            "open" => GREEN,
+            "closed" => CYAN,
+            "staged_ready" => YELLOW,
+            "staged_warnings" => ORANGE,
+            _ => MUTED,
         };
 
-        // Line 1: ID, name, status
-        let header_line = Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!("{} ", convoy.id),
-                Style::default().fg(ACCENT_DIM),
-            ),
-            Span::styled(
-                &convoy.name,
-                Style::default()
-                    .fg(TEXT_BRIGHT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                convoy.status.label(),
-                Style::default()
-                    .fg(status_color)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(
-                    "  [{} agents]",
-                    convoy.agents_assigned.len()
-                ),
-                Style::default().fg(MUTED),
-            ),
-        ]));
-        frame.render_widget(header_line, line1);
+        let progress = if convoy.total > 0 {
+            convoy.completed as f64 / convoy.total as f64
+        } else {
+            0.0
+        };
+        let pct = (progress * 100.0) as u16;
 
-        // Line 2: Progress gauge
-        let pct = (convoy.progress() * 100.0) as u16;
-        let gauge_color = match convoy.progress() {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{} ", convoy.id), Style::default().fg(ACCENT_DIM)),
+                Span::styled(&convoy.title, Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+                Span::raw("  "),
+                Span::styled(&convoy.status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            ])),
+            line1,
+        );
+
+        let gauge_color = match progress {
             p if p >= 1.0 => GREEN,
             p if p >= 0.7 => CYAN,
             p if p >= 0.3 => YELLOW,
@@ -641,32 +636,24 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
             .unfilled_style(Style::default().fg(Color::Rgb(40, 40, 55)))
             .line_set(symbols::line::THICK)
             .label(Span::styled(
-                format!(
-                    "  {} done / {} in progress / {} remaining  ({}%)",
-                    convoy.completed_beads,
-                    convoy.in_progress_beads,
-                    convoy.total_beads - convoy.completed_beads - convoy.in_progress_beads,
-                    pct,
-                ),
+                format!("  {}/{} ({pct}%)", convoy.completed, convoy.total),
                 Style::default().fg(TEXT),
             ))
-            .ratio(convoy.progress());
+            .ratio(progress);
         frame.render_widget(gauge, line2);
 
-        // Line 3: Assigned agents
-        let agent_spans: Vec<Span> = convoy
-            .agents_assigned
-            .iter()
-            .flat_map(|a| {
-                vec![
-                    Span::styled(a, Style::default().fg(CYAN)),
-                    Span::styled("  ", Style::default()),
-                ]
-            })
-            .collect();
-        let mut full_spans = vec![Span::styled("  Agents: ", Style::default().fg(MUTED))];
-        full_spans.extend(agent_spans);
-        frame.render_widget(Paragraph::new(Line::from(full_spans)), line3);
+        // Show tracked items if available
+        if let Some(ref tracked) = convoy.tracked {
+            let worker_spans: Vec<Span> = tracked.iter().filter_map(|t| {
+                t.worker.as_ref().map(|w| {
+                    let color = if t.blocked.unwrap_or(false) { RED } else { CYAN };
+                    Span::styled(format!("{w}  "), Style::default().fg(color))
+                })
+            }).collect();
+            let mut spans = vec![Span::styled("  Workers: ", Style::default().fg(MUTED))];
+            spans.extend(worker_spans);
+            frame.render_widget(Paragraph::new(Line::from(spans)), line3);
+        }
     }
 }
 
@@ -679,55 +666,48 @@ fn draw_beads(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let header = Row::new(vec![
         Cell::from("ID").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("P").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Type").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Title").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Rig").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Assigned To").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("Convoy").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Assignee").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = beads
-        .iter()
-        .skip(app.scroll)
-        .map(|bead| {
-            let status_color = match bead.status {
-                BeadStatus::Open => MUTED,
-                BeadStatus::InProgress => CYAN,
-                BeadStatus::Done => GREEN,
-                BeadStatus::Blocked => RED,
-            };
-            Row::new(vec![
-                Cell::from(bead.id.clone()).style(Style::default().fg(ACCENT_DIM)),
-                Cell::from(bead.status.label()).style(
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(bead.title.clone()).style(Style::default().fg(TEXT)),
-                Cell::from(bead.rig.clone()).style(Style::default().fg(PURPLE)),
-                Cell::from(
-                    bead.assigned_to
-                        .clone()
-                        .unwrap_or_else(|| "—".into()),
-                )
-                .style(Style::default().fg(CYAN)),
-                Cell::from(
-                    bead.convoy_id
-                        .clone()
-                        .unwrap_or_else(|| "—".into()),
-                )
-                .style(Style::default().fg(MUTED)),
-            ])
-        })
-        .collect();
+    let rows: Vec<Row> = beads.iter().skip(app.scroll).map(|(rig, bead)| {
+        let status_color = match bead.status.as_str() {
+            "open" => MUTED,
+            "in_progress" => CYAN,
+            "closed" => GREEN,
+            "blocked" => RED,
+            _ => MUTED,
+        };
+        let priority_color = match bead.priority {
+            0 => RED,
+            1 => ORANGE,
+            2 => YELLOW,
+            3 => MUTED,
+            _ => Color::Rgb(50, 50, 60),
+        };
+        Row::new(vec![
+            Cell::from(bead.id.clone()).style(Style::default().fg(ACCENT_DIM)),
+            Cell::from(format!("P{}", bead.priority)).style(Style::default().fg(priority_color)),
+            Cell::from(bead.status.clone()).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Cell::from(bead.issue_type.clone()).style(Style::default().fg(MUTED)),
+            Cell::from(bead.title.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(rig.clone()).style(Style::default().fg(PURPLE)),
+            Cell::from(bead.assignee.clone().unwrap_or_else(|| "—".into())).style(Style::default().fg(CYAN)),
+        ])
+    }).collect();
 
     let widths = [
         Constraint::Length(12),
-        Constraint::Length(9),
-        Constraint::Min(30),
-        Constraint::Length(16),
-        Constraint::Length(14),
+        Constraint::Length(4),
+        Constraint::Length(12),
         Constraint::Length(10),
+        Constraint::Min(30),
+        Constraint::Length(14),
+        Constraint::Length(14),
     ];
 
     let table = Table::new(rows, widths)
@@ -735,7 +715,7 @@ fn draw_beads(frame: &mut Frame, app: &mut App, area: Rect) {
         .block(
             Block::default()
                 .title(Span::styled(
-                    format!(" Beads ({}) ", beads.len()),
+                    format!(" Beads ({count}) "),
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
@@ -743,15 +723,10 @@ fn draw_beads(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(BORDER))
                 .style(Style::default().bg(SURFACE)),
         );
-
     frame.render_widget(table, area);
 
-    let sb_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 0,
-    });
-    let mut sb_state =
-        ScrollbarState::new(beads.len()).position(app.scroll);
+    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_style(Style::default().fg(ACCENT_DIM))
@@ -777,57 +752,36 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("Path").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = repos
-        .iter()
-        .skip(app.scroll)
-        .map(|repo| {
-            let status_text = if repo.dirty { "modified" } else { "clean" };
-            let status_color = if repo.dirty { YELLOW } else { GREEN };
+    let rows: Vec<Row> = repos.iter().skip(app.scroll).map(|repo| {
+        let status_text = if repo.dirty { "modified" } else { "clean" };
+        let status_color = if repo.dirty { YELLOW } else { GREEN };
+        let sync = if repo.ahead > 0 && repo.behind > 0 {
+            format!("↑{}↓{}", repo.ahead, repo.behind)
+        } else if repo.ahead > 0 {
+            format!("↑{}", repo.ahead)
+        } else if repo.behind > 0 {
+            format!("↓{}", repo.behind)
+        } else {
+            "synced".into()
+        };
+        let sync_color = if repo.ahead > 0 || repo.behind > 0 { ORANGE } else { MUTED };
+        let path_str = repo.path.to_string_lossy()
+            .replace(&dirs::home_dir().unwrap_or_default().to_string_lossy().to_string(), "~");
+        let commit = if repo.last_commit.len() > 40 {
+            format!("{}…", &repo.last_commit[..39])
+        } else {
+            repo.last_commit.clone()
+        };
 
-            let sync = if repo.ahead > 0 && repo.behind > 0 {
-                format!("↑{}↓{}", repo.ahead, repo.behind)
-            } else if repo.ahead > 0 {
-                format!("↑{}", repo.ahead)
-            } else if repo.behind > 0 {
-                format!("↓{}", repo.behind)
-            } else {
-                "synced".into()
-            };
-            let sync_color = if repo.ahead > 0 || repo.behind > 0 {
-                ORANGE
-            } else {
-                MUTED
-            };
-
-            let path_str = repo
-                .path
-                .to_string_lossy()
-                .replace(&dirs::home_dir().unwrap_or_default().to_string_lossy().to_string(), "~");
-
-            let commit = if repo.last_commit.len() > 40 {
-                format!("{}…", &repo.last_commit[..39])
-            } else {
-                repo.last_commit.clone()
-            };
-
-            Row::new(vec![
-                Cell::from(repo.name.clone()).style(
-                    Style::default()
-                        .fg(TEXT_BRIGHT)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(repo.branch.clone()).style(Style::default().fg(PURPLE)),
-                Cell::from(status_text).style(
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Cell::from(sync).style(Style::default().fg(sync_color)),
-                Cell::from(commit).style(Style::default().fg(MUTED)),
-                Cell::from(path_str).style(Style::default().fg(ACCENT_DIM)),
-            ])
-        })
-        .collect();
+        Row::new(vec![
+            Cell::from(repo.name.clone()).style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+            Cell::from(repo.branch.clone()).style(Style::default().fg(PURPLE)),
+            Cell::from(status_text).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+            Cell::from(sync).style(Style::default().fg(sync_color)),
+            Cell::from(commit).style(Style::default().fg(MUTED)),
+            Cell::from(path_str).style(Style::default().fg(ACCENT_DIM)),
+        ])
+    }).collect();
 
     let widths = [
         Constraint::Length(18),
@@ -843,7 +797,7 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
         .block(
             Block::default()
                 .title(Span::styled(
-                    format!(" Repositories ({}) ", repos.len()),
+                    format!(" Repositories ({count}) "),
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ))
                 .borders(Borders::ALL)
@@ -851,15 +805,10 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
                 .border_style(Style::default().fg(BORDER))
                 .style(Style::default().bg(SURFACE)),
         );
-
     frame.render_widget(table, area);
 
-    let sb_area = area.inner(Margin {
-        vertical: 1,
-        horizontal: 0,
-    });
-    let mut sb_state =
-        ScrollbarState::new(repos.len()).position(app.scroll);
+    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_style(Style::default().fg(ACCENT_DIM))
@@ -872,21 +821,18 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
 // ── Spawn dialog ─────────────────────────────────────────────────────
 
 fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
-    let dialog_width = 50u16.min(area.width.saturating_sub(4));
-    let dialog_height = 14u16.min(area.height.saturating_sub(4));
+    let dialog_width = 55u16.min(area.width.saturating_sub(4));
+    let dialog_height = 16u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(dialog_width)) / 2;
     let y = (area.height.saturating_sub(dialog_height)) / 2;
     let dialog_area = Rect::new(x, y, dialog_width, dialog_height);
 
-    // Dim background
     frame.render_widget(Clear, dialog_area);
 
     let block = Block::default()
         .title(Span::styled(
-            " Spawn Agent ",
-            Style::default()
-                .fg(ACCENT)
-                .add_modifier(Modifier::BOLD),
+            " Spawn Agent (gt sling) ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ))
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
@@ -895,7 +841,8 @@ fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    let [field1, field2, field3, _gap, help_area] = Layout::vertical([
+    let [rig_hint_area, field1, field2, field3, _gap, help_area] = Layout::vertical([
+        Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Length(2),
         Constraint::Length(2),
@@ -904,91 +851,67 @@ fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .areas(inner);
 
+    // Show available rigs
+    let rig_names: Vec<String> = app.rigs.iter().map(|r| r.name.clone()).collect();
+    let rig_hint = Paragraph::new(Line::from(vec![
+        Span::styled(" Rigs: ", Style::default().fg(MUTED)),
+        Span::styled(rig_names.join(", "), Style::default().fg(ACCENT_DIM)),
+    ]));
+    frame.render_widget(rig_hint, rig_hint_area);
+
     let field_style = |active: bool| {
-        if active {
-            Style::default().fg(TEXT_BRIGHT)
-        } else {
-            Style::default().fg(MUTED)
-        }
+        if active { Style::default().fg(TEXT_BRIGHT) } else { Style::default().fg(MUTED) }
     };
     let label_style = |active: bool| {
-        if active {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
-        }
+        if active { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(MUTED) }
     };
 
     // Rig field
     let rig_text = if app.spawn_rig.is_empty() && app.spawn_field == 0 {
         "type rig name…"
-    } else if app.spawn_rig.is_empty() {
-        ""
-    } else {
-        &app.spawn_rig
-    };
-    let rig_line = Line::from(vec![
-        Span::styled(" Rig:     ", label_style(app.spawn_field == 0)),
-        Span::styled(rig_text, field_style(app.spawn_field == 0)),
-        if app.spawn_field == 0 {
-            Span::styled("█", Style::default().fg(ACCENT))
-        } else {
-            Span::raw("")
-        },
-    ]);
-    frame.render_widget(Paragraph::new(rig_line), field1);
+    } else if app.spawn_rig.is_empty() { "" } else { &app.spawn_rig };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Rig:     ", label_style(app.spawn_field == 0)),
+            Span::styled(rig_text, field_style(app.spawn_field == 0)),
+            if app.spawn_field == 0 { Span::styled("█", Style::default().fg(ACCENT)) } else { Span::raw("") },
+        ])),
+        field1,
+    );
 
     // Runtime selector
-    let runtime_line = Line::from(vec![
-        Span::styled(" Runtime: ", label_style(app.spawn_field == 1)),
-        Span::styled(
-            format!("◀ {} ▶", app.spawn_runtime()),
-            field_style(app.spawn_field == 1),
-        ),
-    ]);
-    frame.render_widget(Paragraph::new(runtime_line), field2);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Runtime: ", label_style(app.spawn_field == 1)),
+            Span::styled(format!("◀ {} ▶", app.spawn_runtime()), field_style(app.spawn_field == 1)),
+        ])),
+        field2,
+    );
 
     // Task field
     let task_text = if app.spawn_task.is_empty() && app.spawn_field == 2 {
         "describe the task…"
-    } else if app.spawn_task.is_empty() {
-        ""
-    } else {
-        &app.spawn_task
-    };
-    let task_line = Line::from(vec![
-        Span::styled(" Task:    ", label_style(app.spawn_field == 2)),
-        Span::styled(task_text, field_style(app.spawn_field == 2)),
-        if app.spawn_field == 2 {
-            Span::styled("█", Style::default().fg(ACCENT))
-        } else {
-            Span::raw("")
-        },
-    ]);
-    frame.render_widget(Paragraph::new(task_line), field3);
+    } else if app.spawn_task.is_empty() { "" } else { &app.spawn_task };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Task:    ", label_style(app.spawn_field == 2)),
+            Span::styled(task_text, field_style(app.spawn_field == 2)),
+            if app.spawn_field == 2 { Span::styled("█", Style::default().fg(ACCENT)) } else { Span::raw("") },
+        ])),
+        field3,
+    );
 
-    // Help
-    let help = Paragraph::new(Line::from(vec![
-        Span::styled(" Tab", Style::default().fg(ACCENT)),
-        Span::styled(":next field  ", Style::default().fg(MUTED)),
-        Span::styled("↑↓", Style::default().fg(ACCENT)),
-        Span::styled(":runtime  ", Style::default().fg(MUTED)),
-        Span::styled("Enter", Style::default().fg(ACCENT)),
-        Span::styled(":spawn  ", Style::default().fg(MUTED)),
-        Span::styled("Esc", Style::default().fg(ACCENT)),
-        Span::styled(":cancel", Style::default().fg(MUTED)),
-    ]));
-    frame.render_widget(help, help_area);
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-
-fn format_duration(secs: u64) -> String {
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    if h > 0 {
-        format!("{h}h {m}m")
-    } else {
-        format!("{m}m")
-    }
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Tab", Style::default().fg(ACCENT)),
+            Span::styled(":next  ", Style::default().fg(MUTED)),
+            Span::styled("↑↓", Style::default().fg(ACCENT)),
+            Span::styled(":runtime  ", Style::default().fg(MUTED)),
+            Span::styled("Enter", Style::default().fg(ACCENT)),
+            Span::styled(":spawn  ", Style::default().fg(MUTED)),
+            Span::styled("Esc", Style::default().fg(ACCENT)),
+            Span::styled(":cancel", Style::default().fg(MUTED)),
+        ])),
+        help_area,
+    );
 }
