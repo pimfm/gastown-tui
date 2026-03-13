@@ -62,7 +62,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
     let [title_area, tabs_area] =
         Layout::horizontal([Constraint::Length(22), Constraint::Min(40)]).areas(area);
 
-    let spinner = ['◐', '◓', '◑', '◒'];
+    let spinner = ['\u{25D0}', '\u{25D3}', '\u{25D1}', '\u{25D2}'];
     let spin_char = spinner[(app.tick as usize / 2) % spinner.len()];
 
     let title = Paragraph::new(Line::from(vec![
@@ -72,7 +72,9 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             "GAS TOWN",
-            Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(" TUI", Style::default().fg(ACCENT_DIM)),
     ]))
@@ -91,7 +93,9 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
             Line::from(vec![
                 Span::styled(
                     format!("{}", i + 1),
-                    Style::default().fg(ACCENT_DIM).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(ACCENT_DIM)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::raw(":"),
                 Span::styled(t.to_string(), Style::default().fg(TEXT)),
@@ -107,7 +111,7 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
         )
-        .divider(Span::styled(" │ ", Style::default().fg(BORDER)))
+        .divider(Span::styled(" | ", Style::default().fg(BORDER)))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM)
@@ -120,35 +124,32 @@ fn draw_header(frame: &mut Frame, app: &App, area: Rect) {
 // ── Footer ───────────────────────────────────────────────────────────
 
 fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
-    let gt_status = if app.gt_root.is_some() {
+    let api_status = if app.connected {
         Span::styled(
-            " GT ✓ ",
+            " API OK ",
             Style::default().fg(GREEN).bg(Color::Rgb(30, 50, 30)),
         )
     } else {
         Span::styled(
-            " GT ✗ ",
+            " API -- ",
             Style::default().fg(RED).bg(Color::Rgb(50, 30, 30)),
         )
     };
 
-    let dolt_status = if app.dolt_running {
-        Span::styled(
-            "Dolt ✓ ",
-            Style::default().fg(GREEN),
-        )
+    let dolt_status = if app.infra.dolt_running {
+        Span::styled("Dolt OK ", Style::default().fg(GREEN))
     } else {
-        Span::styled(
-            "Dolt ✗ ",
-            Style::default().fg(MUTED),
-        )
+        Span::styled("Dolt -- ", Style::default().fg(MUTED))
     };
 
     let help = if app.filter_active {
         Line::from(vec![
-            Span::styled(" / ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " / ",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(&app.filter_text, Style::default().fg(TEXT_BRIGHT)),
-            Span::styled("█", Style::default().fg(ACCENT)),
+            Span::styled("\u{2588}", Style::default().fg(ACCENT)),
             Span::styled("  Esc:close  Enter:apply", Style::default().fg(MUTED)),
         ])
     } else if let Some(ref msg) = app.status_msg {
@@ -158,7 +159,7 @@ fn draw_footer(frame: &mut Frame, app: &App, area: Rect) {
         ])
     } else {
         Line::from(vec![
-            gt_status,
+            api_status,
             Span::raw(" "),
             dolt_status,
             Span::styled("q", Style::default().fg(ACCENT)),
@@ -201,39 +202,54 @@ fn draw_dashboard(frame: &mut Frame, app: &mut App, area: Rect) {
     .areas(top);
 
     draw_stat_card(
-        frame, card1, "Rigs",
-        &app.summary.rig_count.to_string(),
+        frame,
+        card1,
+        "Rigs",
+        &app.stats.rigs.to_string(),
         "registered",
         CYAN,
     );
     draw_stat_card(
-        frame, card2, "Agents",
-        &format!("{}/{}", app.agents_running(), app.agents.len()),
+        frame,
+        card2,
+        "Agents",
+        &format!("{}/{}", app.stats.agents_running, app.stats.agents_total),
         "running",
-        if app.agents_running() > 0 { GREEN } else { MUTED },
+        if app.stats.agents_running > 0 {
+            GREEN
+        } else {
+            MUTED
+        },
     );
     draw_stat_card(
-        frame, card3, "Polecats",
-        &app.summary.polecat_count.to_string(),
-        &format!("{} hooks", app.summary.active_hooks),
+        frame,
+        card3,
+        "Polecats",
+        &app.stats.polecats.to_string(),
+        &format!("{} hooks", app.stats.active_hooks),
         PURPLE,
     );
 
-    let user_beads = app.user_beads();
-    let open_beads = user_beads.iter().filter(|(_, b)| b.status == "open").count();
-    let in_prog = user_beads.iter().filter(|(_, b)| b.status == "in_progress").count();
     draw_stat_card(
-        frame, card4, "Beads",
-        &format!("{}/{}", in_prog, user_beads.len()),
-        &format!("{open_beads} open"),
+        frame,
+        card4,
+        "Beads",
+        &format!("{}/{}", app.stats.beads_in_progress, app.stats.beads_total),
+        &format!("{} open", app.stats.beads_open),
         ACCENT,
     );
 
     draw_stat_card(
-        frame, card5, "Mail",
-        &app.unread_mail.to_string(),
+        frame,
+        card5,
+        "Mail",
+        &app.stats.unread_mail.to_string(),
         "unread",
-        if app.unread_mail > 0 { YELLOW } else { MUTED },
+        if app.stats.unread_mail > 0 {
+            YELLOW
+        } else {
+            MUTED
+        },
     );
 
     // ── Rig overview + infrastructure ──
@@ -273,7 +289,10 @@ fn draw_stat_card(
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(value, Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                value,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!(" {suffix}"), Style::default().fg(MUTED)),
         ])),
         value_area,
@@ -295,7 +314,10 @@ fn draw_rig_overview(frame: &mut Frame, app: &App, area: Rect) {
 
     if app.rigs.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled("No rigs registered", Style::default().fg(MUTED))),
+            Paragraph::new(Span::styled(
+                "No rigs registered",
+                Style::default().fg(MUTED),
+            )),
             inner,
         );
         return;
@@ -310,25 +332,29 @@ fn draw_rig_overview(frame: &mut Frame, app: &App, area: Rect) {
         Cell::from("Hooks").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = app.rigs.iter().map(|rig| {
-        let active_hooks = rig.hooks.iter().filter(|h| h.has_work).count();
-        Row::new(vec![
-            Cell::from(rig.name.clone()).style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
-            Cell::from(rig.polecat_count.to_string()).style(Style::default().fg(
-                if rig.polecat_count > 0 { GREEN } else { MUTED }
-            )),
-            Cell::from(rig.crew_count.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(if rig.has_witness { "✓" } else { "✗" }).style(Style::default().fg(
-                if rig.has_witness { GREEN } else { MUTED }
-            )),
-            Cell::from(if rig.has_refinery { "✓" } else { "✗" }).style(Style::default().fg(
-                if rig.has_refinery { GREEN } else { MUTED }
-            )),
-            Cell::from(format!("{}/{}", active_hooks, rig.hooks.len())).style(Style::default().fg(
-                if active_hooks > 0 { YELLOW } else { MUTED }
-            )),
-        ])
-    }).collect();
+    let rows: Vec<Row> = app
+        .rigs
+        .iter()
+        .map(|rig| {
+            Row::new(vec![
+                Cell::from(rig.name.clone())
+                    .style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+                Cell::from(rig.polecats.to_string()).style(
+                    Style::default().fg(if rig.polecats > 0 { GREEN } else { MUTED }),
+                ),
+                Cell::from(rig.crews.to_string()).style(Style::default().fg(MUTED)),
+                Cell::from(if rig.has_witness { "Y" } else { "N" }).style(
+                    Style::default().fg(if rig.has_witness { GREEN } else { MUTED }),
+                ),
+                Cell::from(if rig.has_refinery { "Y" } else { "N" }).style(
+                    Style::default().fg(if rig.has_refinery { GREEN } else { MUTED }),
+                ),
+                Cell::from(format!("{}/{}", rig.hooks_active, rig.hooks_total)).style(
+                    Style::default().fg(if rig.hooks_active > 0 { YELLOW } else { MUTED }),
+                ),
+            ])
+        })
+        .collect();
 
     let widths = [
         Constraint::Length(16),
@@ -358,7 +384,11 @@ fn draw_infra_status(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     let status_line = |name: &str, running: bool, extra: &str| -> Line {
-        let (sym, color) = if running { ("●", GREEN) } else { ("○", MUTED) };
+        let (sym, color) = if running {
+            ("\u{25CF}", GREEN)
+        } else {
+            ("\u{25CB}", MUTED)
+        };
         Line::from(vec![
             Span::styled(format!(" {sym} "), Style::default().fg(color)),
             Span::styled(format!("{name:<12}"), Style::default().fg(TEXT)),
@@ -370,13 +400,19 @@ fn draw_infra_status(frame: &mut Frame, app: &App, area: Rect) {
         ])
     };
 
+    let dolt_extra = app
+        .infra
+        .dolt_port
+        .map(|p| format!("port {p}"))
+        .unwrap_or_default();
+
     let lines = vec![
-        status_line("Daemon", app.daemon_running, ""),
-        status_line("Dolt", app.dolt_running, "port 3307"),
+        status_line("Daemon", app.infra.daemon_running, ""),
+        status_line("Dolt", app.infra.dolt_running, &dolt_extra),
         status_line(
             "Tmux",
-            app.tmux_running,
-            &format!("{} sessions", app.tmux_sessions),
+            app.infra.tmux_running,
+            &format!("{} sessions", app.infra.tmux_sessions),
         ),
         Line::default(),
         Line::from(vec![
@@ -386,19 +422,32 @@ fn draw_infra_status(frame: &mut Frame, app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("   Workspace: ", Style::default().fg(MUTED)),
             Span::styled(
-                app.gt_root.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "not found".into()),
+                app.infra
+                    .workspace
+                    .as_deref()
+                    .unwrap_or("not found"),
                 Style::default().fg(ACCENT_DIM),
             ),
         ]),
         Line::default(),
         Line::from(vec![
             Span::styled("   Agents: ", Style::default().fg(MUTED)),
-            Span::styled(format!("{} running", app.agents_running()), Style::default().fg(
-                if app.agents_running() > 0 { GREEN } else { MUTED }
-            )),
-            Span::styled(format!("  {} with work", app.agents_with_work()), Style::default().fg(
-                if app.agents_with_work() > 0 { CYAN } else { MUTED }
-            )),
+            Span::styled(
+                format!("{} running", app.agents_running()),
+                Style::default().fg(if app.agents_running() > 0 {
+                    GREEN
+                } else {
+                    MUTED
+                }),
+            ),
+            Span::styled(
+                format!("  {} with work", app.agents_with_work()),
+                Style::default().fg(if app.agents_with_work() > 0 {
+                    CYAN
+                } else {
+                    MUTED
+                }),
+            ),
         ]),
     ];
 
@@ -420,43 +469,62 @@ fn draw_recent_beads(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let beads = app.user_beads();
-    if beads.is_empty() {
+    if app.beads.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled("No beads found. Create tasks with 's' to spawn.", Style::default().fg(MUTED))),
+            Paragraph::new(Span::styled(
+                "No beads found. Create tasks with 's' to spawn.",
+                Style::default().fg(MUTED),
+            )),
             inner,
         );
         return;
     }
 
-    let items: Vec<ListItem> = beads.iter().take(inner.height as usize).map(|(rig, bead)| {
-        let (status_sym, status_color) = match bead.status.as_str() {
-            "open" => ("○", MUTED),
-            "in_progress" => ("◉", CYAN),
-            "closed" => ("✓", GREEN),
-            "blocked" => ("✗", RED),
-            _ => ("?", MUTED),
-        };
-        let priority_color = match bead.priority {
-            0 => RED,
-            1 => ORANGE,
-            2 => YELLOW,
-            3 => MUTED,
-            _ => Color::Rgb(50, 50, 60),
-        };
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("{status_sym} "), Style::default().fg(status_color)),
-            Span::styled(format!("P{} ", bead.priority), Style::default().fg(priority_color)),
-            Span::styled(format!("{:<10} ", bead.id), Style::default().fg(ACCENT_DIM)),
-            Span::styled(format!("{:<12} ", rig), Style::default().fg(PURPLE)),
-            Span::styled(&bead.title, Style::default().fg(TEXT)),
-            if let Some(ref assignee) = bead.assignee {
-                Span::styled(format!("  → {assignee}"), Style::default().fg(CYAN))
-            } else {
-                Span::raw("")
-            },
-        ]))
-    }).collect();
+    let items: Vec<ListItem> = app
+        .beads
+        .iter()
+        .take(inner.height as usize)
+        .map(|bead| {
+            let (status_sym, status_color) = match bead.status.as_str() {
+                "open" => ("\u{25CB}", MUTED),
+                "in_progress" => ("\u{25C9}", CYAN),
+                "closed" => ("Y", GREEN),
+                "blocked" => ("X", RED),
+                _ => ("?", MUTED),
+            };
+            let priority_color = match bead.priority {
+                0 => RED,
+                1 => ORANGE,
+                2 => YELLOW,
+                3 => MUTED,
+                _ => Color::Rgb(50, 50, 60),
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{status_sym} "),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    format!("P{} ", bead.priority),
+                    Style::default().fg(priority_color),
+                ),
+                Span::styled(
+                    format!("{:<10} ", bead.id),
+                    Style::default().fg(ACCENT_DIM),
+                ),
+                Span::styled(
+                    format!("{:<12} ", bead.rig),
+                    Style::default().fg(PURPLE),
+                ),
+                Span::styled(&bead.title, Style::default().fg(TEXT)),
+                if let Some(ref assignee) = bead.assignee {
+                    Span::styled(format!("  -> {assignee}"), Style::default().fg(CYAN))
+                } else {
+                    Span::raw("")
+                },
+            ]))
+        })
+        .collect();
 
     frame.render_widget(List::new(items), inner);
 }
@@ -480,35 +548,52 @@ fn draw_agents(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("Mail").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = agents.iter().skip(app.scroll).map(|agent| {
-        let running_color = if agent.running { GREEN } else { MUTED };
-        let work_color = if agent.has_work { CYAN } else { MUTED };
-        let role = agent.role.as_deref().unwrap_or("—");
-        let state = agent.state.as_deref().unwrap_or("—");
-        let state_color = match state {
-            "active" | "working" => GREEN,
-            "idle" => MUTED,
-            "stuck" => YELLOW,
-            _ => TEXT,
-        };
-        let runtime = agent.agent_alias.as_deref().unwrap_or("—");
-        let hook = agent.hook_bead.as_deref().unwrap_or("—");
-        let mail = agent.unread_mail.unwrap_or(0);
+    let rows: Vec<Row> = agents
+        .iter()
+        .skip(app.scroll)
+        .map(|agent| {
+            let running_color = if agent.running { GREEN } else { MUTED };
+            let work_color = if agent.has_work { CYAN } else { MUTED };
+            let role = agent.role.as_deref().unwrap_or("\u{2014}");
+            let state = agent.state.as_deref().unwrap_or("\u{2014}");
+            let state_color = match state {
+                "active" | "working" => GREEN,
+                "idle" => MUTED,
+                "stuck" => YELLOW,
+                _ => TEXT,
+            };
+            let runtime = agent.runtime.as_deref().unwrap_or("\u{2014}");
+            let hook = agent.hook_bead.as_deref().unwrap_or("\u{2014}");
+            let mail = agent.unread_mail;
 
-        Row::new(vec![
-            Cell::from(agent.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
-            Cell::from(agent.address.clone()).style(Style::default().fg(ACCENT_DIM)),
-            Cell::from(role.to_string()).style(Style::default().fg(PURPLE)),
-            Cell::from(state.to_string()).style(Style::default().fg(state_color).add_modifier(Modifier::BOLD)),
-            Cell::from(if agent.running { "✓" } else { "✗" }).style(Style::default().fg(running_color)),
-            Cell::from(if agent.has_work { "✓" } else { "—" }).style(Style::default().fg(work_color)),
-            Cell::from(runtime.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(hook.to_string()).style(Style::default().fg(if hook != "—" { CYAN } else { MUTED })),
-            Cell::from(if mail > 0 { format!("{mail}") } else { "—".into() }).style(Style::default().fg(
-                if mail > 0 { YELLOW } else { MUTED }
-            )),
-        ])
-    }).collect();
+            Row::new(vec![
+                Cell::from(agent.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
+                Cell::from(agent.address.clone()).style(Style::default().fg(ACCENT_DIM)),
+                Cell::from(role.to_string()).style(Style::default().fg(PURPLE)),
+                Cell::from(state.to_string()).style(
+                    Style::default()
+                        .fg(state_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Cell::from(if agent.running { "Y" } else { "N" })
+                    .style(Style::default().fg(running_color)),
+                Cell::from(if agent.has_work { "Y" } else { "\u{2014}" })
+                    .style(Style::default().fg(work_color)),
+                Cell::from(runtime.to_string()).style(Style::default().fg(MUTED)),
+                Cell::from(hook.to_string()).style(
+                    Style::default().fg(if hook != "\u{2014}" { CYAN } else { MUTED }),
+                ),
+                Cell::from(if mail > 0 {
+                    format!("{mail}")
+                } else {
+                    "\u{2014}".into()
+                })
+                .style(
+                    Style::default().fg(if mail > 0 { YELLOW } else { MUTED }),
+                ),
+            ])
+        })
+        .collect();
 
     let widths = [
         Constraint::Length(12),
@@ -537,7 +622,10 @@ fn draw_agents(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     frame.render_widget(table, area);
 
-    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let sb_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 0,
+    });
     let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -608,19 +696,25 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
             _ => MUTED,
         };
 
-        let progress = if convoy.total > 0 {
-            convoy.completed as f64 / convoy.total as f64
-        } else {
-            0.0
-        };
+        let progress = convoy.progress;
         let pct = (progress * 100.0) as u16;
 
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(format!("{} ", convoy.id), Style::default().fg(ACCENT_DIM)),
-                Span::styled(&convoy.title, Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &convoy.title,
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("  "),
-                Span::styled(&convoy.status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    &convoy.status,
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ])),
             line1,
         );
@@ -642,14 +736,15 @@ fn draw_convoys(frame: &mut Frame, app: &mut App, area: Rect) {
             .ratio(progress);
         frame.render_widget(gauge, line2);
 
-        // Show tracked items if available
-        if let Some(ref tracked) = convoy.tracked {
-            let worker_spans: Vec<Span> = tracked.iter().filter_map(|t| {
-                t.worker.as_ref().map(|w| {
-                    let color = if t.blocked.unwrap_or(false) { RED } else { CYAN };
-                    Span::styled(format!("{w}  "), Style::default().fg(color))
+        if !convoy.workers.is_empty() {
+            let worker_spans: Vec<Span> = convoy
+                .workers
+                .iter()
+                .map(|w| {
+                    let color = if w.blocked { RED } else { CYAN };
+                    Span::styled(format!("{}  ", w.name), Style::default().fg(color))
                 })
-            }).collect();
+                .collect();
             let mut spans = vec![Span::styled("  Workers: ", Style::default().fg(MUTED))];
             spans.extend(worker_spans);
             frame.render_widget(Paragraph::new(Line::from(spans)), line3);
@@ -674,31 +769,45 @@ fn draw_beads(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("Assignee").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = beads.iter().skip(app.scroll).map(|(rig, bead)| {
-        let status_color = match bead.status.as_str() {
-            "open" => MUTED,
-            "in_progress" => CYAN,
-            "closed" => GREEN,
-            "blocked" => RED,
-            _ => MUTED,
-        };
-        let priority_color = match bead.priority {
-            0 => RED,
-            1 => ORANGE,
-            2 => YELLOW,
-            3 => MUTED,
-            _ => Color::Rgb(50, 50, 60),
-        };
-        Row::new(vec![
-            Cell::from(bead.id.clone()).style(Style::default().fg(ACCENT_DIM)),
-            Cell::from(format!("P{}", bead.priority)).style(Style::default().fg(priority_color)),
-            Cell::from(bead.status.clone()).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-            Cell::from(bead.issue_type.clone()).style(Style::default().fg(MUTED)),
-            Cell::from(bead.title.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(rig.clone()).style(Style::default().fg(PURPLE)),
-            Cell::from(bead.assignee.clone().unwrap_or_else(|| "—".into())).style(Style::default().fg(CYAN)),
-        ])
-    }).collect();
+    let rows: Vec<Row> = beads
+        .iter()
+        .skip(app.scroll)
+        .map(|bead| {
+            let status_color = match bead.status.as_str() {
+                "open" => MUTED,
+                "in_progress" => CYAN,
+                "closed" => GREEN,
+                "blocked" => RED,
+                _ => MUTED,
+            };
+            let priority_color = match bead.priority {
+                0 => RED,
+                1 => ORANGE,
+                2 => YELLOW,
+                3 => MUTED,
+                _ => Color::Rgb(50, 50, 60),
+            };
+            Row::new(vec![
+                Cell::from(bead.id.clone()).style(Style::default().fg(ACCENT_DIM)),
+                Cell::from(format!("P{}", bead.priority))
+                    .style(Style::default().fg(priority_color)),
+                Cell::from(bead.status.clone()).style(
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Cell::from(bead.issue_type.clone()).style(Style::default().fg(MUTED)),
+                Cell::from(bead.title.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(bead.rig.clone()).style(Style::default().fg(PURPLE)),
+                Cell::from(
+                    bead.assignee
+                        .clone()
+                        .unwrap_or_else(|| "\u{2014}".into()),
+                )
+                .style(Style::default().fg(CYAN)),
+            ])
+        })
+        .collect();
 
     let widths = [
         Constraint::Length(12),
@@ -725,7 +834,10 @@ fn draw_beads(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     frame.render_widget(table, area);
 
-    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let sb_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 0,
+    });
     let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -747,41 +859,52 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
         Cell::from("Repository").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Branch").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
-        Cell::from("↑↓").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Cell::from("Sync").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Last Commit").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
         Cell::from("Path").style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
     ]);
 
-    let rows: Vec<Row> = repos.iter().skip(app.scroll).map(|repo| {
-        let status_text = if repo.dirty { "modified" } else { "clean" };
-        let status_color = if repo.dirty { YELLOW } else { GREEN };
-        let sync = if repo.ahead > 0 && repo.behind > 0 {
-            format!("↑{}↓{}", repo.ahead, repo.behind)
-        } else if repo.ahead > 0 {
-            format!("↑{}", repo.ahead)
-        } else if repo.behind > 0 {
-            format!("↓{}", repo.behind)
-        } else {
-            "synced".into()
-        };
-        let sync_color = if repo.ahead > 0 || repo.behind > 0 { ORANGE } else { MUTED };
-        let path_str = repo.path.to_string_lossy()
-            .replace(&dirs::home_dir().unwrap_or_default().to_string_lossy().to_string(), "~");
-        let commit = if repo.last_commit.len() > 40 {
-            format!("{}…", &repo.last_commit[..39])
-        } else {
-            repo.last_commit.clone()
-        };
+    let rows: Vec<Row> = repos
+        .iter()
+        .skip(app.scroll)
+        .map(|repo| {
+            let status_text = if repo.dirty { "modified" } else { "clean" };
+            let status_color = if repo.dirty { YELLOW } else { GREEN };
+            let sync = if repo.ahead > 0 && repo.behind > 0 {
+                format!("+{} -{}", repo.ahead, repo.behind)
+            } else if repo.ahead > 0 {
+                format!("+{}", repo.ahead)
+            } else if repo.behind > 0 {
+                format!("-{}", repo.behind)
+            } else {
+                "synced".into()
+            };
+            let sync_color = if repo.ahead > 0 || repo.behind > 0 {
+                ORANGE
+            } else {
+                MUTED
+            };
+            let commit = if repo.last_commit.len() > 40 {
+                format!("{}...", &repo.last_commit[..39])
+            } else {
+                repo.last_commit.clone()
+            };
 
-        Row::new(vec![
-            Cell::from(repo.name.clone()).style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
-            Cell::from(repo.branch.clone()).style(Style::default().fg(PURPLE)),
-            Cell::from(status_text).style(Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
-            Cell::from(sync).style(Style::default().fg(sync_color)),
-            Cell::from(commit).style(Style::default().fg(MUTED)),
-            Cell::from(path_str).style(Style::default().fg(ACCENT_DIM)),
-        ])
-    }).collect();
+            Row::new(vec![
+                Cell::from(repo.name.clone())
+                    .style(Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
+                Cell::from(repo.branch.clone()).style(Style::default().fg(PURPLE)),
+                Cell::from(status_text).style(
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Cell::from(sync).style(Style::default().fg(sync_color)),
+                Cell::from(commit).style(Style::default().fg(MUTED)),
+                Cell::from(repo.path.clone()).style(Style::default().fg(ACCENT_DIM)),
+            ])
+        })
+        .collect();
 
     let widths = [
         Constraint::Length(18),
@@ -807,7 +930,10 @@ fn draw_repos(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     frame.render_widget(table, area);
 
-    let sb_area = area.inner(Margin { vertical: 1, horizontal: 0 });
+    let sb_area = area.inner(Margin {
+        vertical: 1,
+        horizontal: 0,
+    });
     let mut sb_state = ScrollbarState::new(count).position(app.scroll);
     frame.render_stateful_widget(
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -851,7 +977,6 @@ fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
     ])
     .areas(inner);
 
-    // Show available rigs
     let rig_names: Vec<String> = app.rigs.iter().map(|r| r.name.clone()).collect();
     let rig_hint = Paragraph::new(Line::from(vec![
         Span::styled(" Rigs: ", Style::default().fg(MUTED)),
@@ -860,43 +985,69 @@ fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(rig_hint, rig_hint_area);
 
     let field_style = |active: bool| {
-        if active { Style::default().fg(TEXT_BRIGHT) } else { Style::default().fg(MUTED) }
+        if active {
+            Style::default().fg(TEXT_BRIGHT)
+        } else {
+            Style::default().fg(MUTED)
+        }
     };
     let label_style = |active: bool| {
-        if active { Style::default().fg(ACCENT).add_modifier(Modifier::BOLD) } else { Style::default().fg(MUTED) }
+        if active {
+            Style::default()
+                .fg(ACCENT)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        }
     };
 
-    // Rig field
     let rig_text = if app.spawn_rig.is_empty() && app.spawn_field == 0 {
-        "type rig name…"
-    } else if app.spawn_rig.is_empty() { "" } else { &app.spawn_rig };
+        "type rig name..."
+    } else if app.spawn_rig.is_empty() {
+        ""
+    } else {
+        &app.spawn_rig
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Rig:     ", label_style(app.spawn_field == 0)),
             Span::styled(rig_text, field_style(app.spawn_field == 0)),
-            if app.spawn_field == 0 { Span::styled("█", Style::default().fg(ACCENT)) } else { Span::raw("") },
+            if app.spawn_field == 0 {
+                Span::styled("\u{2588}", Style::default().fg(ACCENT))
+            } else {
+                Span::raw("")
+            },
         ])),
         field1,
     );
 
-    // Runtime selector
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Runtime: ", label_style(app.spawn_field == 1)),
-            Span::styled(format!("◀ {} ▶", app.spawn_runtime()), field_style(app.spawn_field == 1)),
+            Span::styled(
+                format!("< {} >", app.spawn_runtime()),
+                field_style(app.spawn_field == 1),
+            ),
         ])),
         field2,
     );
 
-    // Task field
     let task_text = if app.spawn_task.is_empty() && app.spawn_field == 2 {
-        "describe the task…"
-    } else if app.spawn_task.is_empty() { "" } else { &app.spawn_task };
+        "describe the task..."
+    } else if app.spawn_task.is_empty() {
+        ""
+    } else {
+        &app.spawn_task
+    };
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Task:    ", label_style(app.spawn_field == 2)),
             Span::styled(task_text, field_style(app.spawn_field == 2)),
-            if app.spawn_field == 2 { Span::styled("█", Style::default().fg(ACCENT)) } else { Span::raw("") },
+            if app.spawn_field == 2 {
+                Span::styled("\u{2588}", Style::default().fg(ACCENT))
+            } else {
+                Span::raw("")
+            },
         ])),
         field3,
     );
@@ -905,7 +1056,7 @@ fn draw_spawn_dialog(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(Line::from(vec![
             Span::styled(" Tab", Style::default().fg(ACCENT)),
             Span::styled(":next  ", Style::default().fg(MUTED)),
-            Span::styled("↑↓", Style::default().fg(ACCENT)),
+            Span::styled("Up/Dn", Style::default().fg(ACCENT)),
             Span::styled(":runtime  ", Style::default().fg(MUTED)),
             Span::styled("Enter", Style::default().fg(ACCENT)),
             Span::styled(":spawn  ", Style::default().fg(MUTED)),

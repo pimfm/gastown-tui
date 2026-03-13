@@ -1,40 +1,35 @@
-use std::path::PathBuf;
-
-#[allow(unused_imports)]
-use crate::gastown::{
-    BdIssue, GtAgent, GtConvoy, GtMail, GtRig, TownSummary,
+use crate::api_client::{
+    AgentInfo, ApiClient, BeadSummary, ConvoyInfo, DashboardStats, InfraStatus, RepoSummary,
+    RigSummary,
 };
-use crate::repos::RepoInfo;
 
 pub const TAB_COUNT: usize = 5;
 pub const TAB_NAMES: [&str; TAB_COUNT] = ["Dashboard", "Agents", "Convoys", "Beads", "Repos"];
+
+const DEFAULT_API_URL: &str = "http://localhost:3333";
 
 pub struct App {
     pub tab: usize,
     pub scroll: usize,
     pub max_scroll: usize,
 
-    // Gas Town workspace
-    pub gt_root: Option<PathBuf>,
-    pub gt_available: bool,
-    pub bd_available: bool,
+    // API connection
+    pub api: ApiClient,
+    pub api_url: String,
+    pub connected: bool,
 
-    // Real data from Gas Town
+    // Dashboard data
     pub town_name: String,
     pub overseer_name: String,
-    pub unread_mail: u32,
-    pub daemon_running: bool,
-    pub dolt_running: bool,
-    pub tmux_running: bool,
-    pub tmux_sessions: u32,
+    pub stats: DashboardStats,
+    pub infra: InfraStatus,
 
-    pub agents: Vec<GtAgent>,
-    pub rigs: Vec<GtRig>,
-    pub summary: TownSummary,
-    pub convoys: Vec<GtConvoy>,
-    pub all_beads: Vec<(String, BdIssue)>, // (rig_name, issue)
-    pub mail: Vec<GtMail>,
-    pub repos: Vec<RepoInfo>,
+    // List data
+    pub rigs: Vec<RigSummary>,
+    pub agents: Vec<AgentInfo>,
+    pub convoys: Vec<ConvoyInfo>,
+    pub beads: Vec<BeadSummary>,
+    pub repos: Vec<RepoSummary>,
 
     // Filter
     pub filter_active: bool,
@@ -56,59 +51,27 @@ pub struct App {
 
 const RUNTIMES: [&str; 5] = ["claude", "gemini", "codex", "cursor", "copilot"];
 
-impl Default for TownSummary {
-    fn default() -> Self {
-        Self {
-            rig_count: 0,
-            polecat_count: 0,
-            crew_count: 0,
-            witness_count: 0,
-            refinery_count: 0,
-            active_hooks: 0,
-        }
-    }
-}
-
 impl App {
     pub fn new() -> Self {
-        let gt_root = crate::gastown::find_gt_root();
-        let gt_available = crate::gastown::gt_available();
-        let bd_available = crate::gastown::bd_available();
-
-        // Boot all Gas Town services (daemon, dolt, tmux, deacon, mayor, etc.)
-        let status_msg = if gt_available {
-            if let Some(ref root) = gt_root {
-                match crate::gastown::boot_services(root) {
-                    Ok(_) => Some("Gas Town services started (gt up)".into()),
-                    Err(e) => Some(format!("gt up failed: {e}")),
-                }
-            } else {
-                Some("No Gas Town workspace found at ~/gt".into())
-            }
-        } else {
-            Some("gt CLI not found — install Gas Town for full functionality".into())
-        };
+        let api_url =
+            std::env::var("GASTOWN_API").unwrap_or_else(|_| DEFAULT_API_URL.to_string());
+        let api = ApiClient::new(api_url.clone());
 
         Self {
             tab: 0,
             scroll: 0,
             max_scroll: 0,
-            gt_root,
-            gt_available,
-            bd_available,
+            api,
+            api_url: api_url.clone(),
+            connected: false,
             town_name: String::new(),
             overseer_name: String::new(),
-            unread_mail: 0,
-            daemon_running: false,
-            dolt_running: false,
-            tmux_running: false,
-            tmux_sessions: 0,
-            agents: Vec::new(),
+            stats: DashboardStats::default(),
+            infra: InfraStatus::default(),
             rigs: Vec::new(),
-            summary: TownSummary::default(),
+            agents: Vec::new(),
             convoys: Vec::new(),
-            all_beads: Vec::new(),
-            mail: Vec::new(),
+            beads: Vec::new(),
             repos: Vec::new(),
             filter_active: false,
             filter_text: String::new(),
@@ -117,81 +80,45 @@ impl App {
             spawn_rig: String::new(),
             spawn_runtime_idx: 0,
             spawn_task: String::new(),
-            status_msg,
+            status_msg: Some(format!("Connecting to API at {api_url}...")),
             tick: 0,
         }
     }
 
     pub fn refresh_all(&mut self) {
-        self.gt_available = crate::gastown::gt_available();
-        self.bd_available = crate::gastown::bd_available();
-        self.gt_root = crate::gastown::find_gt_root();
-
-        if let Some(root) = &self.gt_root {
-            let root = root.clone();
-            self.refresh_status(&root);
-            self.refresh_convoys(&root);
-            self.refresh_beads(&root);
-            self.refresh_mail(&root);
+        if let Some(d) = self.api.dashboard() {
+            self.connected = true;
+            self.town_name = d.town_name;
+            self.overseer_name = d.overseer;
+            self.stats = d.stats;
+            self.infra = d.infrastructure;
+            self.rigs = d.rigs;
+            // Clear the initial connecting message
+            if self
+                .status_msg
+                .as_deref()
+                .is_some_and(|m| m.starts_with("Connecting to API") || m.starts_with("Cannot reach API"))
+            {
+                self.status_msg = None;
+            }
+        } else {
+            self.connected = false;
+            self.status_msg = Some(format!("Cannot reach API at {}", self.api_url));
+            return;
         }
-        self.repos = crate::repos::scan_repos();
-    }
 
-    fn refresh_status(&mut self, root: &PathBuf) {
-        if let Some(status) = crate::gastown::fetch_status(root) {
-            self.town_name = status.name;
-            if let Some(ref overseer) = status.overseer {
-                self.overseer_name = overseer.name.clone();
-                self.unread_mail = overseer.unread_mail;
-            }
-            if let Some(ref daemon) = status.daemon {
-                self.daemon_running = daemon.running;
-            }
-            if let Some(ref dolt) = status.dolt {
-                self.dolt_running = dolt.running;
-            }
-            if let Some(ref tmux) = status.tmux {
-                self.tmux_running = tmux.running;
-                self.tmux_sessions = tmux.session_count;
-            }
-            // Flatten all agents: town-level + per-rig
-            self.agents.clear();
-            self.agents.extend(status.agents);
-            for rig in &status.rigs {
-                for agent in &rig.agents {
-                    let mut a = agent.clone();
-                    if !a.address.contains('/') {
-                        a.address = format!("{}/{}", rig.name, a.name);
-                    }
-                    self.agents.push(a);
-                }
-            }
-            self.rigs = status.rigs;
-            if let Some(summary) = status.summary {
-                self.summary = summary;
-            }
+        if let Some(a) = self.api.agents() {
+            self.agents = a.agents;
         }
-    }
-
-    fn refresh_convoys(&mut self, root: &PathBuf) {
-        self.convoys = crate::gastown::fetch_convoys(root);
-    }
-
-    fn refresh_beads(&mut self, root: &PathBuf) {
-        self.all_beads.clear();
-        for issue in crate::gastown::fetch_hq_beads(root) {
-            self.all_beads.push(("hq".to_string(), issue));
+        if let Some(c) = self.api.convoys() {
+            self.convoys = c.convoys;
         }
-        let rig_names: Vec<String> = self.rigs.iter().map(|r| r.name.clone()).collect();
-        for rig_name in &rig_names {
-            for issue in crate::gastown::fetch_beads_for_rig(root, rig_name) {
-                self.all_beads.push((rig_name.clone(), issue));
-            }
+        if let Some(b) = self.api.beads() {
+            self.beads = b.beads;
         }
-    }
-
-    fn refresh_mail(&mut self, root: &PathBuf) {
-        self.mail = crate::gastown::fetch_mail(root);
+        if let Some(r) = self.api.repos() {
+            self.repos = r.repos;
+        }
     }
 
     pub fn on_tick(&mut self) {
@@ -201,36 +128,11 @@ impl App {
     // ── Derived stats ────────────────────────────────────────────────
 
     pub fn agents_running(&self) -> usize {
-        self.agents.iter().filter(|a| a.running).count()
+        self.stats.agents_running
     }
 
     pub fn agents_with_work(&self) -> usize {
         self.agents.iter().filter(|a| a.has_work).count()
-    }
-
-    pub fn user_beads(&self) -> Vec<&(String, BdIssue)> {
-        self.all_beads
-            .iter()
-            .filter(|(_, b)| {
-                b.issue_type != "molecule"
-                    && !b.labels.as_ref().is_some_and(|l| l.iter().any(|l| l.starts_with("gt:")))
-                    && !b.id.contains("-rig-")
-                    && !b.title.ends_with("Patrol")
-                    && !b.id.contains("-witness")
-                    && !b.id.contains("-refinery")
-            })
-            .collect()
-    }
-
-    pub fn beads_by_status(&self, status: &str) -> usize {
-        self.user_beads()
-            .iter()
-            .filter(|(_, b)| b.status == status)
-            .count()
-    }
-
-    pub fn active_convoys(&self) -> Vec<&GtConvoy> {
-        self.convoys.iter().filter(|c| c.status == "open").collect()
     }
 
     // ── Navigation ───────────────────────────────────────────────────
@@ -241,7 +143,11 @@ impl App {
     }
 
     pub fn prev_tab(&mut self) {
-        self.tab = if self.tab == 0 { TAB_COUNT - 1 } else { self.tab - 1 };
+        self.tab = if self.tab == 0 {
+            TAB_COUNT - 1
+        } else {
+            self.tab - 1
+        };
         self.scroll = 0;
     }
 
@@ -354,31 +260,24 @@ impl App {
     }
 
     pub fn confirm_spawn(&mut self) {
-        if let Some(root) = &self.gt_root {
-            let root = root.clone();
-            let rig = self.spawn_rig.clone();
-            let task = self.spawn_task.clone();
-            if rig.is_empty() || task.is_empty() {
-                self.status_msg = Some("Rig and task are required".into());
-                return;
-            }
-            match crate::gastown::create_bead(&root, &rig, &task, "task", 2) {
-                Ok(bead_id) => {
-                    match crate::gastown::spawn_polecat(&root, &rig, &bead_id) {
-                        Ok(_) => {
-                            self.status_msg = Some(format!("Spawned: {bead_id} in {rig}"));
-                        }
-                        Err(e) => {
-                            self.status_msg = Some(format!("Created {bead_id}, sling failed: {e}"));
-                        }
-                    }
+        let rig = self.spawn_rig.clone();
+        let task = self.spawn_task.clone();
+        if rig.is_empty() || task.is_empty() {
+            self.status_msg = Some("Rig and task are required".into());
+            return;
+        }
+        match self.api.create_bead(&rig, &task) {
+            Ok(bead_id) => match self.api.spawn_polecat(&rig, &bead_id) {
+                Ok(_) => {
+                    self.status_msg = Some(format!("Spawned: {bead_id} in {rig}"));
                 }
                 Err(e) => {
-                    self.status_msg = Some(format!("Create failed: {e}"));
+                    self.status_msg = Some(format!("Created {bead_id}, sling failed: {e}"));
                 }
+            },
+            Err(e) => {
+                self.status_msg = Some(format!("Create failed: {e}"));
             }
-        } else {
-            self.status_msg = Some("No Gas Town workspace found at ~/gt".into());
         }
         self.show_spawn_dialog = false;
         self.refresh_all();
@@ -388,7 +287,7 @@ impl App {
 
     // ── Filtered data accessors ──────────────────────────────────────
 
-    pub fn filtered_agents(&self) -> Vec<&GtAgent> {
+    pub fn filtered_agents(&self) -> Vec<&AgentInfo> {
         let f = self.filter_text.to_lowercase();
         self.agents
             .iter()
@@ -402,7 +301,7 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_convoys(&self) -> Vec<&GtConvoy> {
+    pub fn filtered_convoys(&self) -> Vec<&ConvoyInfo> {
         let f = self.filter_text.to_lowercase();
         self.convoys
             .iter()
@@ -415,22 +314,22 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_beads(&self) -> Vec<&(String, BdIssue)> {
+    pub fn filtered_beads(&self) -> Vec<&BeadSummary> {
         let f = self.filter_text.to_lowercase();
-        self.user_beads()
-            .into_iter()
-            .filter(|(rig, b)| {
+        self.beads
+            .iter()
+            .filter(|b| {
                 f.is_empty()
                     || b.title.to_lowercase().contains(&f)
                     || b.id.to_lowercase().contains(&f)
                     || b.status.to_lowercase().contains(&f)
                     || b.issue_type.to_lowercase().contains(&f)
-                    || rig.to_lowercase().contains(&f)
+                    || b.rig.to_lowercase().contains(&f)
             })
             .collect()
     }
 
-    pub fn filtered_repos(&self) -> Vec<&RepoInfo> {
+    pub fn filtered_repos(&self) -> Vec<&RepoSummary> {
         let f = self.filter_text.to_lowercase();
         self.repos
             .iter()
@@ -438,7 +337,7 @@ impl App {
                 f.is_empty()
                     || r.name.to_lowercase().contains(&f)
                     || r.branch.to_lowercase().contains(&f)
-                    || r.path.to_string_lossy().to_lowercase().contains(&f)
+                    || r.path.to_lowercase().contains(&f)
             })
             .collect()
     }

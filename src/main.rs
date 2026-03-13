@@ -1,6 +1,5 @@
+mod api_client;
 mod app;
-mod gastown;
-mod repos;
 mod ui;
 
 use std::io;

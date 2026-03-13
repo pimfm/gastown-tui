@@ -1,8 +1,8 @@
 [package]
 name = "gastown-tui"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "A terminal UI for Gas Town multi-agent orchestration"
+description = "A terminal UI for Gas Town multi-agent orchestration (API client)"
 
 [dependencies]
 ratatui = "0.29"
@@ -10,6 +10,4 @@ crossterm = { version = "0.28", features = ["event-stream"] }
 color-eyre = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4", features = ["serde"] }
-dirs = "6"
-unicode-width = "0.2"
+ureq = { version = "2", features = ["json"] }
