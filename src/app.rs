@@ -71,13 +71,31 @@ impl Default for TownSummary {
 
 impl App {
     pub fn new() -> Self {
+        let gt_root = crate::gastown::find_gt_root();
+        let gt_available = crate::gastown::gt_available();
+        let bd_available = crate::gastown::bd_available();
+
+        // Boot all Gas Town services (daemon, dolt, tmux, deacon, mayor, etc.)
+        let status_msg = if gt_available {
+            if let Some(ref root) = gt_root {
+                match crate::gastown::boot_services(root) {
+                    Ok(_) => Some("Gas Town services started (gt up)".into()),
+                    Err(e) => Some(format!("gt up failed: {e}")),
+                }
+            } else {
+                Some("No Gas Town workspace found at ~/gt".into())
+            }
+        } else {
+            Some("gt CLI not found — install Gas Town for full functionality".into())
+        };
+
         Self {
             tab: 0,
             scroll: 0,
             max_scroll: 0,
-            gt_root: crate::gastown::find_gt_root(),
-            gt_available: crate::gastown::gt_available(),
-            bd_available: crate::gastown::bd_available(),
+            gt_root,
+            gt_available,
+            bd_available,
             town_name: String::new(),
             overseer_name: String::new(),
             unread_mail: 0,
@@ -99,7 +117,7 @@ impl App {
             spawn_rig: String::new(),
             spawn_runtime_idx: 0,
             spawn_task: String::new(),
-            status_msg: None,
+            status_msg,
             tick: 0,
         }
     }

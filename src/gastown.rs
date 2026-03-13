@@ -205,6 +205,23 @@ pub struct GtEvent {
     pub rig: Option<String>,
 }
 
+// ── Bootstrap: start all Gas Town services ──────────────────────────
+
+/// Run `gt up` to boot dolt, daemon, deacon, mayor, witnesses, and refineries.
+/// This is idempotent — only starts services that aren't already running.
+pub fn boot_services(gt_root: &Path) -> Result<String, String> {
+    let out = Command::new("gt")
+        .current_dir(gt_root)
+        .args(["up", "--quiet"])
+        .output()
+        .map_err(|e| format!("failed to run gt up: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 // ── Fetching functions ───────────────────────────────────────────────
 
 pub fn fetch_status(gt_root: &Path) -> Option<TownStatus> {
